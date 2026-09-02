@@ -41,11 +41,12 @@ type WorkerState =
 
 const FOOTER_KEY = "om";
 const WORKERS_WIDGET_KEY = "om-workers";
-const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"] as const;
+const RUNNING_GLYPH = "◐";
 /** Separator between worker indicators on the single combined line. */
 const WORKER_SEP = "   ";
 
 export interface StatusControllerOptions {
+	/** @deprecated Worker indicators are static to avoid full-transcript TUI renders. */
 	spinnerIntervalMs?: number;
 	settleMs?: number;
 }
@@ -58,16 +59,12 @@ interface WorkerEntry {
 
 export class StatusController {
 	private ui: StatusUI | undefined;
-	private frame = 0;
 	private readonly workers = new Map<string, WorkerEntry>();
-	private spinnerTimer: ReturnType<typeof setInterval> | undefined;
 	private gauges: FooterGauges | undefined;
 	private cost: { costUsd: number; runs: number } | undefined;
-	private readonly spinnerIntervalMs: number;
 	private readonly settleMs: number;
 
 	constructor(options: StatusControllerOptions = {}) {
-		this.spinnerIntervalMs = options.spinnerIntervalMs ?? 120;
 		this.settleMs = options.settleMs ?? 5000;
 	}
 
@@ -77,7 +74,6 @@ export class StatusController {
 	}
 
 	detach(): void {
-		this.stopSpinner();
 		for (const entry of this.workers.values()) {
 			if (entry.settleTimer) clearTimeout(entry.settleTimer);
 		}
@@ -106,7 +102,6 @@ export class StatusController {
 		const existing = this.workers.get(runId);
 		if (existing?.settleTimer) clearTimeout(existing.settleTimer);
 		this.workers.set(runId, { type, state: { kind: "running" } });
-		this.startSpinner();
 		this.renderWorkersWidget();
 	}
 
@@ -130,33 +125,8 @@ export class StatusController {
 			// Re-render the combined widget with this worker removed, or clear
 			// the widget entirely if the last worker just left.
 			this.renderWorkersWidget();
-			if (!this.hasRunningWorker()) this.stopSpinner();
 		}, this.settleMs);
 		entry.settleTimer.unref?.();
-		if (!this.hasRunningWorker()) this.stopSpinner();
-	}
-
-	private hasRunningWorker(): boolean {
-		for (const entry of this.workers.values()) {
-			if (entry.state.kind === "running") return true;
-		}
-		return false;
-	}
-
-	private startSpinner(): void {
-		if (this.spinnerTimer) return;
-		this.spinnerTimer = setInterval(() => {
-			this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
-			// One re-render of the combined widget per tick covers all running workers.
-			if (this.hasRunningWorker()) this.renderWorkersWidget();
-		}, this.spinnerIntervalMs);
-		this.spinnerTimer.unref?.();
-	}
-
-	private stopSpinner(): void {
-		if (!this.spinnerTimer) return;
-		clearInterval(this.spinnerTimer);
-		this.spinnerTimer = undefined;
 	}
 
 	/** A compact colored fill bar, e.g. `▕████░░░░▏`. Filled cells use `over` (an alert color) past max. */
@@ -201,7 +171,7 @@ export class StatusController {
 		const parts: string[] = [];
 		for (const entry of this.workers.values()) {
 			if (entry.state.kind === "running") {
-				parts.push(`${theme.fg("accent", SPINNER_FRAMES[this.frame])} ${theme.fg("accent", `[${entry.type}]`)}`);
+				parts.push(`${theme.fg("accent", RUNNING_GLYPH)} ${theme.fg("accent", `[${entry.type}]`)}`);
 			} else if (entry.state.kind === "error") {
 				parts.push(`${theme.fg("error", "✗")} ${theme.fg("muted", `[${entry.type}]`)}`);
 			} else {

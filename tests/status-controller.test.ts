@@ -1,16 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { StatusController, type StatusUI } from "../src/ui/status-controller.js";
 
 function fakeUI() {
 	const status = new Map<string, string | undefined>();
+	const widgets: Array<string[] | undefined> = [];
 	const ui: StatusUI = {
 		setStatus: (key, text) => status.set(key, text),
-		setWidget: () => {},
+		setWidget: (_key, content) => widgets.push(content),
 		// Strip color so assertions read the raw glyphs.
 		theme: { fg: (_color, text) => text },
 	};
-	return { ui, footer: () => status.get("om") };
+	return { ui, footer: () => status.get("om"), widgets };
 }
 
 describe("StatusController footer gauges", () => {
@@ -19,6 +20,22 @@ describe("StatusController footer gauges", () => {
 		const sc = new StatusController();
 		sc.attach(ui);
 		expect(footer()).toBe("om");
+	});
+
+	it("keeps running-worker status static", () => {
+		vi.useFakeTimers();
+		try {
+			const { ui, widgets } = fakeUI();
+			const sc = new StatusController();
+			sc.attach(ui);
+			sc.workerStart("observer", "run-1");
+			expect(widgets).toEqual([["◐ [observer]"]]);
+			vi.advanceTimersByTime(1000);
+			expect(widgets).toEqual([["◐ [observer]"]]);
+			sc.detach();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("clearing gauges returns to the bare footer", () => {
