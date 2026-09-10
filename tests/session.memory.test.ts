@@ -34,11 +34,11 @@ function fakeCtx(sessionId: string, header?: { parentSession?: string }) {
 }
 
 describe("ensureSessionMemory", () => {
-	it("returns the per-session root and does not create it without a parent", () => {
+	it("creates the per-session root even without a parent", () => {
 		const root = ensureSessionMemory(fakeCtx("child"));
 		expect(root).toBe(sessionMemoryRoot(cwd, "child"));
-		// Lazy: nothing to seed, so the dir is left for the first durable write to create.
-		expect(existsSync(root)).toBe(false);
+		// A real directory keeps the central friendly-name symlink non-dangling before first write.
+		expect(existsSync(root)).toBe(true);
 	});
 
 	it("seeds from the parent session on first touch, excluding .runs/", () => {
@@ -73,9 +73,9 @@ describe("ensureSessionMemory", () => {
 		expect(readFileSync(join(root, "auth.md"), "utf-8")).toBe("child copy");
 	});
 
-	it("skips seeding when the parent kept no memory under this project", () => {
+	it("creates an empty root when the parent kept no memory under this project", () => {
 		const parentFile = writeSessionFile("parent"); // no parent memory root on disk
 		const root = ensureSessionMemory(fakeCtx("child", { parentSession: parentFile }));
-		expect(existsSync(root)).toBe(false);
+		expect(existsSync(root)).toBe(true);
 	});
 });

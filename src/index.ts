@@ -18,6 +18,8 @@ import { registerCompactionTrigger } from "./hooks/compaction-trigger.js";
 import { registerConsolidatorTrigger } from "./hooks/consolidator-trigger.js";
 import { registerObserverTrigger } from "./hooks/observer-trigger.js";
 import { OM_ENABLED, type Entry } from "./ledger/index.js";
+import { syncMemoryNameIndex } from "./memory/name-index.js";
+import { sessionMemoryRoot } from "./memory/paths.js";
 import { ensureSessionMemory } from "./memory/session.js";
 import { Runtime } from "./runtime.js";
 
@@ -42,15 +44,30 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 		}
 	}
 
+	function syncFriendlyIndex(ctx: any, name = pi.getSessionName()): void {
+		const sessionId = ctx.sessionManager.getSessionId();
+		syncMemoryNameIndex(sessionMemoryRoot(ctx.cwd, sessionId), sessionId, name);
+	}
+
 	pi.on("session_start", (_event: unknown, ctx: any) => {
 		runtime.ensureConfig(ctx.cwd);
 		runtime.dispatchedCoversUpToId = undefined;
 		const branch = ctx.sessionManager.getBranch() as Entry[];
 		runtime.enabled = readGateFromLedger(branch);
 		if (runtime.enabled) runtime.memoryRoot = ensureSessionMemory(ctx);
+		syncFriendlyIndex(ctx);
 		attachIfEnabled(ctx);
 		runtime.refreshFooterGauges(branch, ctx.getContextUsage?.()?.tokens ?? null);
 		runtime.refreshCost(ctx.sessionManager.getEntries() as Entry[]);
+	});
+
+	// Pi 0.85 added this event; the package's broad peer range intentionally keeps older dev
+	// types, so declare only the runtime overload we use instead of pulling a new dependency tree.
+	const sessionInfoEvents = pi as unknown as {
+		on(event: "session_info_changed", handler: (event: { name?: string }, ctx: any) => void): void;
+	};
+	sessionInfoEvents.on("session_info_changed", (event, ctx) => {
+		syncFriendlyIndex(ctx, event.name);
 	});
 
 	pi.on("session_shutdown", () => {
@@ -71,6 +88,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 			pi.appendEntry(OM_ENABLED, { enabled: next });
 			if (next) {
 				runtime.memoryRoot = ensureSessionMemory(ctx);
+				syncFriendlyIndex(ctx);
 				attachIfEnabled(ctx);
 				runtime.refreshFooterGauges(ctx.sessionManager.getBranch() as Entry[], ctx.getContextUsage?.()?.tokens ?? null);
 				runtime.refreshCost(ctx.sessionManager.getEntries() as Entry[]);

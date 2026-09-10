@@ -12,7 +12,7 @@
  * Seeding is idempotent — once the dir exists it is never re-seeded, so resume and /tree never
  * disturb it. The transient `.runs/` IPC directory is excluded.
  */
-import { cpSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { basename, sep } from "node:path";
 import { sessionMemoryRoot } from "./paths.js";
 
@@ -57,8 +57,8 @@ function isRunsPath(p: string): boolean {
 /**
  * Resolve this session's `.memory/<sessionId>/` root, seeding it from the parent session on
  * first touch (fork/clone/new-with-parent). Idempotent: once the dir exists it is returned
- * untouched. Returns the absolute root. When there is no parent memory, the root is NOT created
- * here — the first durable write (INDEX/topic/journey) lazily creates it via `atomicWrite`.
+ * untouched. Returns the absolute root. A session with OM enabled owns a real directory even
+ * before its first worker write, allowing the global friendly-name symlink to remain non-dangling.
  */
 export function ensureSessionMemory(ctx: SessionCtx): string {
 	const sessionId = ctx.sessionManager.getSessionId();
@@ -81,5 +81,6 @@ export function ensureSessionMemory(ctx: SessionCtx): string {
 			}
 		}
 	}
+	mkdirSync(root, { recursive: true });
 	return root;
 }

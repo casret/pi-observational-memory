@@ -57,6 +57,12 @@ consolidator draining the oldest observations into durable per-session memory fi
   which already travels with the fork). The orchestrator owns `INDEX.md` and re-renders it from
   topic front-matter after each run; the consolidator touches `<topic>.md` files plus
   `JOURNEY.md`, via its own `read`/`write`/`edit`/`ls`/`grep` tools scoped to the session dir.
+- **Friendly-name index** (`~/.pi/agent/om-memory/`): a global, secondary index of symlinks
+  to the canonical per-project roots. Entries put the mutable session display name first and
+  append the immutable short id for collision safety, for example
+  `connect-out--01a05dd9 -> /project/.memory/01a05dd9-…`. `/name` renames the link without
+  moving memory; unnamed sessions appear as `unnamed--<short-id>`. Existing unrelated paths
+  are never overwritten, and failure to create a symlink never blocks the memory pipeline.
 - **Journey** (`.memory/<session>/JOURNEY.md`): a single, whole-project, purely **descriptive** prose
   history of how the work got to its current state, maintained by the consolidator and pushed
   into every compaction block for **orientation** (not recall, not instructions). It is
@@ -135,5 +141,6 @@ Layout: `src/` is the master-side orchestrator (entry `src/index.ts`); `agent/` 
 worker extension loaded into subprocesses via `-e` (`OM_WORKER=observer|consolidator`).
 Long-term memory lives under `<project>/.memory/<sessionId>/` (`INDEX.md` + `<topic>.md` +
 `JOURNEY.md`), keyed by the immutable session-header id so sessions in the same project stay
-isolated; a fork seeds its dir from the parent's on first touch. Transient worker IPC lives
-under `<project>/.memory/<sessionId>/.runs/`.
+isolated; a fork seeds its dir from the parent's on first touch. `~/.pi/agent/om-memory/`
+provides friendly-name symlinks across projects without changing those canonical paths.
+Transient worker IPC lives under `<project>/.memory/<sessionId>/.runs/`.
