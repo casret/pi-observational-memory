@@ -14,8 +14,8 @@ function fakeUI() {
 	return { ui, footer: () => status.get("om"), widgets };
 }
 
-describe("StatusController footer gauges", () => {
-	it("shows a bare footer until gauges are set", () => {
+describe("StatusController cost-only footer", () => {
+	it("shows a bare footer until cost is known", () => {
 		const { ui, footer } = fakeUI();
 		const sc = new StatusController();
 		sc.attach(ui);
@@ -38,12 +38,15 @@ describe("StatusController footer gauges", () => {
 		}
 	});
 
-	it("clearing gauges returns to the bare footer", () => {
+	it("renders session spend but not token gauges", () => {
 		const { ui, footer } = fakeUI();
 		const sc = new StatusController();
 		sc.attach(ui);
 		sc.setGauges({ nextValue: 1500, nextMax: 3000, poolValue: 5000, poolMax: 10_000, ctxValue: 10_000, ctxMax: 80_000 });
-		sc.setGauges(undefined);
 		expect(footer()).toBe("om");
+		sc.setCost(5.7696, 42);
+		expect(footer()).toBe("om $5.770");
+		sc.setGauges(undefined);
+		expect(footer()).toBe("om $5.770");
 	});
 });

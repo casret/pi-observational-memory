@@ -60,7 +60,6 @@ interface WorkerEntry {
 export class StatusController {
 	private ui: StatusUI | undefined;
 	private readonly workers = new Map<string, WorkerEntry>();
-	private gauges: FooterGauges | undefined;
 	private cost: { costUsd: number; runs: number } | undefined;
 	private readonly settleMs: number;
 
@@ -78,17 +77,15 @@ export class StatusController {
 			if (entry.settleTimer) clearTimeout(entry.settleTimer);
 		}
 		this.workers.clear();
-		this.gauges = undefined;
 		this.cost = undefined;
 		this.ui?.setWidget(WORKERS_WIDGET_KEY, undefined);
 		if (this.ui) this.ui.setStatus(FOOTER_KEY, undefined);
 		this.ui = undefined;
 	}
 
-	/** Update (or clear) the live footer gauges and re-render the footer in place. */
-	setGauges(gauges: FooterGauges | undefined): void {
-		this.gauges = gauges;
-		if (this.ui) this.ui.setStatus(FOOTER_KEY, this.renderFooter());
+	/** Retained for runtime compatibility; token gauges are intentionally no longer rendered. */
+	setGauges(_gauges: FooterGauges | undefined): void {
+		// Cost and active-worker state are the only useful steady-state signals.
 	}
 
 	/** Update the accumulated session cost shown in the footer and re-render in place. */
@@ -129,31 +126,14 @@ export class StatusController {
 		entry.settleTimer.unref?.();
 	}
 
-	/** A compact colored fill bar, e.g. `▕████░░░░▏`. Filled cells use `over` (an alert color) past max. */
-	private gaugeBar(value: number, max: number, cells = 8): string {
-		const theme = this.ui!.theme;
-		const frac = max <= 0 ? 0 : Math.max(0, value / max);
-		const filled = Math.min(cells, Math.round(Math.min(1, frac) * cells));
-		const fillColor = frac >= 1 ? "warning" : "dim";
-		return (
-			theme.fg(fillColor, "▕") +
-			theme.fg(fillColor, "█".repeat(filled)) +
-			theme.fg(fillColor, "░".repeat(cells - filled)) +
-			theme.fg(fillColor, "▏")
-		);
-	}
-
 	private renderFooter(): string {
 		const theme = this.ui?.theme;
 		if (!theme) return "om";
-		const base = `${theme.fg("success", "om")}`;
-		const g = this.gauges;
-		if (!g) return base;
-		const next = `${theme.fg("muted", "O")}${this.gaugeBar(g.nextValue, g.nextMax)}`;
-		const pool = `${theme.fg("muted", "C")}${this.gaugeBar(g.poolValue, g.poolMax)}`;
-		const ctx = `${theme.fg("muted", "X")}${this.gaugeBar(g.ctxValue, g.ctxMax)}`;
-		const cost = this.cost ? ` ${theme.fg("dim", `$${this.cost.costUsd.toFixed(3)}`)}` : "";
-		return `${next}  ${pool}  ${ctx}${cost}`;
+		const base = theme.fg("success", "om");
+		// Observer/pool/context gauges were visually dense and their thresholds are
+		// implementation detail, not useful steady-state status. Active workers
+		// still appear in the widget; keep the one durable signal: session spend.
+		return this.cost ? `${base} ${theme.fg("dim", `$${this.cost.costUsd.toFixed(3)}`)}` : base;
 	}
 
 	/**
