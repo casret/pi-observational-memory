@@ -13,6 +13,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerCompactCommand } from "./commands/compact.js";
 import { registerConsolidateCommand } from "./commands/consolidate.js";
 import { registerStatusCommand } from "./commands/status.js";
+import {
+	consumeHandoffEnvironment,
+	registerHandoffBridge,
+} from "./handoff.js";
 import { registerCompactionHook } from "./hooks/compaction-hook.js";
 import { registerCompactionTrigger } from "./hooks/compaction-trigger.js";
 import { registerConsolidatorTrigger } from "./hooks/consolidator-trigger.js";
@@ -52,10 +56,21 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event: unknown, ctx: any) => {
 		runtime.ensureConfig(ctx.cwd);
 		runtime.dispatchedCoversUpToId = undefined;
-		const branch = ctx.sessionManager.getBranch() as Entry[];
-		runtime.enabled = readGateFromLedger(branch);
+
+		// /handoff creates a deliberately blank child session, so its normal setup callback runs
+		// too late for session_start. Consume the one-shot state here, persist the gate in the new
+		// ledger, and let ensureSessionMemory seed from the parent before the kickoff turn starts.
+		const { enabled: inheritedFromHandoff, name: inheritedName } = consumeHandoffEnvironment();
+
+		let branch = ctx.sessionManager.getBranch() as Entry[];
+		const ledgerEnabled = readGateFromLedger(branch);
+		runtime.enabled = ledgerEnabled || inheritedFromHandoff;
+		if (inheritedFromHandoff && !ledgerEnabled) {
+			pi.appendEntry(OM_ENABLED, { enabled: true });
+			branch = ctx.sessionManager.getBranch() as Entry[];
+		}
 		if (runtime.enabled) runtime.memoryRoot = ensureSessionMemory(ctx);
-		syncFriendlyIndex(ctx);
+		syncFriendlyIndex(ctx, inheritedName);
 		attachIfEnabled(ctx);
 		runtime.refreshFooterGauges(branch, ctx.getContextUsage?.()?.tokens ?? null);
 		runtime.refreshCost(ctx.sessionManager.getEntries() as Entry[]);
@@ -105,6 +120,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 	registerConsolidatorTrigger(pi, runtime);
 	registerCompactionTrigger(pi, runtime);
 	registerCompactionHook(pi, runtime);
+	registerHandoffBridge(pi, runtime);
 
 	registerStatusCommand(pi, runtime);
 	registerCompactCommand(pi, runtime);

@@ -46,6 +46,13 @@ consolidator draining the oldest observations into durable per-session memory fi
   `.memory/<session>/` topic front-matter) and a **journey** section (`.memory/<session>/JOURNEY.md`, read
   verbatim). The cutoff snaps to an observation chunk boundary so the verbatim tail is never
   double-represented.
+- **Handoff integration** (`/handoff`, when the 0mux handoff extension is installed): an
+  enabled session first asks OM for a transactional projection from the same deterministic
+  journey/map/observations renderer, after waiting for observers. The handoff model receives
+  that canonical memory projection plus only the raw tail newer than observation coverage,
+  without committing a compaction if the preview is cancelled. The blank child session
+  inherits `om.enabled`, seeds its durable memory from the parent, and creates its friendly-name
+  link before the kickoff turn. OM-off handoffs are unchanged.
 - **Consolidator clock** (`turn_end` / `agent_start`): when the active observation pool
   exceeds `consolidateAtPoolTokens`, a single background consolidator subprocess folds the
   **oldest** observations (above `poolTargetTokens`) into durable `.memory/<session>/<topic>.md`
