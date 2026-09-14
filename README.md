@@ -4,16 +4,15 @@ Tiered, subprocess-backed memory for pi.
 
 Parallel **observers** distill raw conversation chunks into atomic observations committed to the master's branch-local **ledger** (so memory stays correct under `/tree`); a deterministic, model-free **compaction** renders that buffer verbatim into the compaction block. A **consolidator** promotes the oldest observations into durable `.memory/<sessionId>/` topic files, bounding the buffer and giving each session its own durable, `grep`-able long-term memory (a fork seeds its memory from its parent).
 
-## On/off gate (default OFF)
+## On/off gate (default ON)
 
-The extension ships in the global extensions folder during development, so it is **gated off
-per session** and is completely invisible until you turn it on.
+Observational memory is enabled for every session unless that session has an explicit opt-out.
 
 - `/om` — toggle for this session
 - `/om on` / `/om off` — set explicitly
 
-State persists per session in the ledger (`om.enabled`) and survives resume. When off, every
-trigger, hook, widget, and subprocess returns immediately.
+Overrides persist per session in the ledger (`om.enabled`) and survive resume. `/om off` is
+authoritative: every trigger, hook, widget, and subprocess returns immediately.
 
 ## How it works
 
@@ -41,8 +40,8 @@ consolidator draining the oldest observations into durable per-session memory fi
 - **Observation** = `{ timestamp, content, tokenCount }`. The precise event-`timestamp`
   doubles as the id; the orchestrator re-derives a unique, second-resolution id at commit
   (the observer only emits minute resolution).
-- **Compaction** (`agent_end` over `compactAtContextTokens`, when idle): waits for in-flight
-  observers, then renders the active buffer plus a **memory map** (rendered live from
+- **Compaction** (`turn_end` when live usage reaches the active model's context window minus
+  `compactBeforeContextEndTokens`): waits for in-flight observers, then renders the active buffer plus a **memory map** (rendered live from
   `.memory/<session>/` topic front-matter) and a **journey** section (`.memory/<session>/JOURNEY.md`, read
   verbatim). The cutoff snaps to an observation chunk boundary so the verbatim tail is never
   double-represented.
@@ -103,7 +102,7 @@ folds each run into an `om.cost` ledger entry.
 | Command | Effect |
 |---|---|
 | `/om`, `/om on`, `/om off` | The per-session on/off gate |
-| `/om:status` | Workers in flight, active observation count, next-observer progress, pool/consolidator state, topic-file count, journey size, context usage, **session cost**, last error |
+| `/om:status` | Workers in flight, active observation count, next-observer progress, pool/consolidator state, topic-file count, journey size, context usage, recent post-compaction request-context baselines, **session cost**, last error |
 | `/om:compact` | Force a compaction now (ignores the threshold) |
 | `/om:consolidate` | Force a consolidation now (ignores the pool threshold) |
 
@@ -119,7 +118,8 @@ Namespace `observational-memory` in `~/.pi/agent/settings.json` (global) or
     "chunkOverlapTokens": 0,
     "poolTargetTokens": 10000,           // buffer drains back toward this after consolidation
     "consolidateAtPoolTokens": 20000,    // pool size that triggers a consolidation (200% of target)
-    "compactAtContextTokens": 100000,    // tune per model
+    "compactBeforeContextEndTokens": 50000, // absolute safety margin below the active model limit
+    "compactAtContextTokens": 150000,    // legacy fallback if context-window metadata is unavailable
     "tailTokens": 20000,                 // verbatim tail; snaps to a chunk boundary
     "journeyTargetTokens": 1000,         // pushed JOURNEY.md size; compress oldest segments past this
     "observerConcurrency": 4,
@@ -132,6 +132,12 @@ Namespace `observational-memory` in `~/.pi/agent/settings.json` (global) or
   }
 }
 ```
+
+The effective proactive threshold is `active contextWindow - compactBeforeContextEndTokens`
+(clamped to at least one token). Because the compaction block is rendered deterministically,
+the margin leaves room for turn/tool-result timing rather than for a compaction-model request.
+The legacy `compactAtContextTokens` value is used only when neither context usage nor the active
+model exposes a valid context window.
 
 `PI_OM_PASSIVE=1` forces `passive` (disables all triggers) for clean `/tree` testing.
 `passive` is a power-user setting distinct from the on/off gate.

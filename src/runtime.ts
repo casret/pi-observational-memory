@@ -1,3 +1,4 @@
+import { effectiveCompactionThreshold } from "./compaction-threshold.js";
 import { type Config, DEFAULTS, loadConfig } from "./config.js";
 import { foldLedger, poolTokens, rawTokensSinceObservationCoverage, sumSessionCost, type Entry } from "./ledger/index.js";
 import { StatusController } from "./ui/status-controller.js";
@@ -10,7 +11,7 @@ export class Runtime {
 	config: Config = { ...DEFAULTS };
 	configLoaded = false;
 
-	/** The per-session on/off gate (default OFF). Outermost guard in every handler. */
+	/** The per-session on/off gate (default ON; explicit ledger overrides persist). */
 	enabled = false;
 
 	/**
@@ -112,7 +113,10 @@ export class Runtime {
 	}
 
 	/** Recompute the live footer gauges (next-observer + pool + context) from the current branch. */
-	refreshFooterGauges(branch: Entry[], contextTokens?: number | null): void {
+	refreshFooterGauges(
+		branch: Entry[],
+		contextUsage?: { tokens: number | null; contextWindow?: number } | null,
+	): void {
 		if (!this.enabled) return;
 		const folded = foldLedger(branch);
 		this.status.setGauges({
@@ -120,8 +124,12 @@ export class Runtime {
 			nextMax: this.config.chunkTokens,
 			poolValue: poolTokens(folded.activeObservations),
 			poolMax: this.config.consolidateAtPoolTokens,
-			ctxValue: contextTokens ?? 0,
-			ctxMax: this.config.compactAtContextTokens,
+			ctxValue: contextUsage?.tokens ?? 0,
+			ctxMax: effectiveCompactionThreshold(
+				contextUsage?.contextWindow,
+				this.config.compactBeforeContextEndTokens,
+				this.config.compactAtContextTokens,
+			),
 		});
 	}
 

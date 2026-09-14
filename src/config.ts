@@ -18,7 +18,15 @@ export interface Config {
 	poolTargetTokens: number;
 	/** Active-pool token count that triggers a consolidation (200% of target). */
 	consolidateAtPoolTokens: number;
-	/** Live context-window usage that triggers compaction. */
+	/**
+	 * Proactive compaction safety margin below the active model's context-window limit.
+	 * OM renders compaction model-free, so this only leaves operational room for another turn.
+	 */
+	compactBeforeContextEndTokens: number;
+	/**
+	 * Legacy absolute threshold used only when the active context window is unavailable.
+	 * Kept for compatibility with older Pi hosts and existing configuration.
+	 */
 	compactAtContextTokens: number;
 	/** Verbatim raw tail kept after the cutoff; snaps to a chunk boundary. */
 	tailTokens: number;
@@ -51,6 +59,7 @@ export const DEFAULTS: Config = {
 	chunkOverlapTokens: 0,
 	poolTargetTokens: 10_000,
 	consolidateAtPoolTokens: 15_000,
+	compactBeforeContextEndTokens: 50_000,
 	compactAtContextTokens: 150_000,
 	tailTokens: 20_000,
 	journeyTargetTokens: 1_000,
@@ -102,6 +111,7 @@ function normalizeSettingsConfig(value: Record<string, unknown>, base: Config): 
 		"chunkOverlapTokens",
 		"poolTargetTokens",
 		"consolidateAtPoolTokens",
+		"compactBeforeContextEndTokens",
 		"compactAtContextTokens",
 		"tailTokens",
 		"journeyTargetTokens",

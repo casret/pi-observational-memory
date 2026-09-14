@@ -5,9 +5,9 @@
  * the ledger (observations) or files (long-term, Phase B), renders compaction, and drives the
  * TUI. Event-driven only — no daemon.
  *
- * Ships in the global extensions folder during development, so it is gated OFF by default per
- * session (A2a). When the gate is off, every handler returns at its first line and the
- * extension is completely invisible.
+ * Enabled by default for sessions without an explicit ledger gate. `/om off` persists an
+ * authoritative opt-out; when off, every handler returns at its first line and the extension
+ * is completely invisible.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerCompactCommand } from "./commands/compact.js";
@@ -27,14 +27,17 @@ import { sessionMemoryRoot } from "./memory/paths.js";
 import { ensureSessionMemory } from "./memory/session.js";
 import { Runtime } from "./runtime.js";
 
-function readGateFromLedger(branch: Entry[]): boolean {
+export const DEFAULT_ENABLED = true;
+
+export function readGateFromLedger(branch: Entry[]): boolean | undefined {
 	for (let i = branch.length - 1; i >= 0; i--) {
 		const entry = branch[i];
 		if (entry.type === "custom" && entry.customType === OM_ENABLED) {
-			return (entry.data as { enabled?: boolean } | undefined)?.enabled ?? false;
+			const enabled = (entry.data as { enabled?: unknown } | undefined)?.enabled;
+			return typeof enabled === "boolean" ? enabled : undefined;
 		}
 	}
-	return false;
+	return undefined;
 }
 
 export default function observationalMemory(pi: ExtensionAPI): void {
@@ -64,15 +67,15 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 
 		let branch = ctx.sessionManager.getBranch() as Entry[];
 		const ledgerEnabled = readGateFromLedger(branch);
-		runtime.enabled = ledgerEnabled || inheritedFromHandoff;
-		if (inheritedFromHandoff && !ledgerEnabled) {
+		runtime.enabled = ledgerEnabled ?? (inheritedFromHandoff || DEFAULT_ENABLED);
+		if (inheritedFromHandoff && ledgerEnabled === undefined) {
 			pi.appendEntry(OM_ENABLED, { enabled: true });
 			branch = ctx.sessionManager.getBranch() as Entry[];
 		}
 		if (runtime.enabled) runtime.memoryRoot = ensureSessionMemory(ctx);
 		syncFriendlyIndex(ctx, inheritedName);
 		attachIfEnabled(ctx);
-		runtime.refreshFooterGauges(branch, ctx.getContextUsage?.()?.tokens ?? null);
+		runtime.refreshFooterGauges(branch, ctx.getContextUsage?.());
 		runtime.refreshCost(ctx.sessionManager.getEntries() as Entry[]);
 	});
 
@@ -105,7 +108,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 				runtime.memoryRoot = ensureSessionMemory(ctx);
 				syncFriendlyIndex(ctx);
 				attachIfEnabled(ctx);
-				runtime.refreshFooterGauges(ctx.sessionManager.getBranch() as Entry[], ctx.getContextUsage?.()?.tokens ?? null);
+				runtime.refreshFooterGauges(ctx.sessionManager.getBranch() as Entry[], ctx.getContextUsage?.());
 				runtime.refreshCost(ctx.sessionManager.getEntries() as Entry[]);
 			} else {
 				runtime.abortAllWorkers();
