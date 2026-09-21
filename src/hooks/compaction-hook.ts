@@ -38,13 +38,17 @@ function firstKeptAfterBoundary(branch: Entry[], boundaryIndex: number): Entry |
  * Snap pi's proposed `firstKeptEntryId` to an observation chunk boundary so the verbatim tail
  * starts exactly where a chunk ends — no chunk straddles the cutoff, so nothing is both
  * rendered into the summary and kept verbatim (and nothing is lost). Among boundaries whose
- * next entry is a valid cut point, pick the one whose resulting tail is closest to
- * `tailTokens`. Falls back to pi's proposal when no boundary qualifies (`tail` undefined).
+ * next entry is a valid cut point and whose resulting tail is at most `tailTokens`, pick
+ * the closest one. A boundary that retains an over-limit tail or is not smaller than the
+ * pre-compaction context can make compaction grow or repeat forever, so it is never safer than
+ * pi's proposal. Falls back to pi's proposal when
+ * no boundary qualifies (`tail` undefined).
  */
 export function snapCutoff(
 	branch: Entry[],
 	proposedFirstKeptId: string,
 	tailTokens: number,
+	preCompactionTokens = Number.POSITIVE_INFINITY,
 ): { firstKeptId: string; tail: number | undefined } {
 	const boundaries = chunkBoundaryIndices(branch);
 	let bestId: string | undefined;
@@ -55,6 +59,7 @@ export function snapCutoff(
 		const firstKept = firstKeptAfterBoundary(branch, boundaryIndex);
 		if (!firstKept) continue;
 		const tail = rawTokensAfterIndex(branch, boundaryIndex);
+		if (tail > tailTokens || tail >= preCompactionTokens) continue;
 		const delta = Math.abs(tail - tailTokens);
 		if (delta < bestDelta) {
 			bestDelta = delta;
@@ -68,6 +73,25 @@ export function snapCutoff(
 
 export function snapFirstKeptEntryId(branch: Entry[], proposedFirstKeptId: string, tailTokens: number): string {
 	return snapCutoff(branch, proposedFirstKeptId, tailTokens).firstKeptId;
+}
+
+/** A repeated cutoff at-or-before the latest compaction cannot remove any more history. */
+export function cutoffMakesProgress(branch: Entry[], firstKeptId: string): boolean {
+	const indexes = entryIndexById(branch);
+	const candidateIndex = indexes.get(firstKeptId);
+	if (candidateIndex === undefined) return true; // let pi validate unresolved ids
+
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = branch[i];
+		if (entry.type !== "compaction" || !entry.firstKeptEntryId) continue;
+		const previousIndex = indexes.get(entry.firstKeptEntryId);
+		if (previousIndex === undefined) return true;
+		if (candidateIndex <= previousIndex) return false;
+		const previousTail = rawTokensAfterIndex(branch, previousIndex - 1);
+		const candidateTail = rawTokensAfterIndex(branch, candidateIndex - 1);
+		return candidateTail < previousTail;
+	}
+	return true;
 }
 
 /**
@@ -130,7 +154,7 @@ export function registerCompactionHook(pi: ExtensionAPI, runtime: Runtime): void
 			// chunk boundaries (fixed at hook entry), so this is safe to do before any wait and lets
 			// us decide whether the wait is needed at all.
 			let branch = (ctx.sessionManager?.getBranch?.() as Entry[] | undefined) ?? (event.branchEntries as Entry[]);
-			let snap = snapCutoff(branch, firstKeptEntryId, tailTokens);
+			let snap = snapCutoff(branch, firstKeptEntryId, tailTokens, tokensBefore);
 
 			// R5 fast path: skip the wait when no in-flight observer can affect this compaction
 			// (its chunk lands in the verbatim tail and the snap is stable). Otherwise wait for
@@ -142,10 +166,14 @@ export function registerCompactionHook(pi: ExtensionAPI, runtime: Runtime): void
 				if (hasUI) ctx.ui.notify("om: waiting for in-flight observers before folding…", "info");
 				await runtime.whenObserversIdle();
 				branch = (ctx.sessionManager?.getBranch?.() as Entry[] | undefined) ?? (event.branchEntries as Entry[]);
-				snap = snapCutoff(branch, firstKeptEntryId, tailTokens);
+				snap = snapCutoff(branch, firstKeptEntryId, tailTokens, tokensBefore);
 			}
 
 			const snapped = snap.firstKeptId;
+			if (!cutoffMakesProgress(branch, snapped)) {
+				if (hasUI) ctx.ui.notify("om: compaction has no new cutoff progress; skipping duplicate", "info");
+				return { cancel: true };
+			}
 			const projection = buildCompactionProjection(branch, snapped);
 			// Phase B: render the long-term tier live from disk, regenerated each compaction
 			// (throwaway projections — cannot decay). The journey is the running descriptive history

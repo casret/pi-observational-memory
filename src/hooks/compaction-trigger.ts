@@ -1,6 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { activeContextWindow, effectiveCompactionThreshold } from "../compaction-threshold.js";
-import { OM_RESUME, rawTokensSinceLastCompaction, type Entry } from "../ledger/index.js";
+import {
+	OM_RESUME,
+	findLastCompactionIndex,
+	rawTokensAfterIndex,
+	rawTokensSinceLastCompaction,
+	type Entry,
+} from "../ledger/index.js";
 import type { Runtime } from "../runtime.js";
 
 /**
@@ -76,6 +82,13 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			return;
 		}
 
+		// A completed compaction with no later source entry cannot make progress.
+		// Pi rejects this as "Already compacted" before the before-compact hook can
+		// make the duplicate idempotent, so avoid issuing the request at all.
+		const branch = ctx.sessionManager.getBranch() as Entry[];
+		const lastCompactionIndex = findLastCompactionIndex(branch);
+		if (lastCompactionIndex >= 0 && rawTokensAfterIndex(branch, lastCompactionIndex) === 0) return;
+
 		const threshold = effectiveCompactionThreshold(
 			activeContextWindow(ctx),
 			runtime.config.compactBeforeContextEndTokens,
@@ -115,7 +128,7 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			},
 			onError: (error: { message: string }) => {
 				runtime.compactInFlight = false;
-				if (error.message === "Compaction cancelled") return;
+				if (error.message === "Compaction cancelled" || /already compacted/i.test(error.message)) return;
 				if (hasUI) ui?.notify(`om: ${error.message}`, "error");
 			},
 		});
