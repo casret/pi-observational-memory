@@ -11,7 +11,19 @@ export function estimateStringTokens(text: string): number {
  * other entry type (memory ledger records, compaction, etc.) contributes 0 so
  * the raw-token clocks measure only new conversation.
  */
-export function estimateEntryTokens(entry: { type: string; message?: unknown; content?: unknown; summary?: unknown }): number {
+export function estimateEntryTokens(entry: {
+	type: string;
+	message?: unknown;
+	content?: unknown;
+	summary?: unknown;
+	projectedMessages?: unknown[];
+}): number {
+	if (entry.projectedMessages !== undefined) {
+		return entry.projectedMessages.reduce<number>(
+			(total, message) => total + estimateMessageTokens(message as Parameters<typeof estimateMessageTokens>[0]),
+			0,
+		);
+	}
 	if (entry.type === "message" && entry.message) {
 		return estimateMessageTokens(entry.message as Parameters<typeof estimateMessageTokens>[0]);
 	}

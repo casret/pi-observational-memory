@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	OM_OBSERVATIONS_RECORDED,
+	canonicalBranch,
 	fullProjection,
 	latestCoverageMarkerId,
 	type Entry,
@@ -43,7 +44,7 @@ export function consumeHandoffEnvironment(): { enabled: boolean; name?: string }
  */
 export async function projectForHandoff(runtime: Runtime, ctx: any): Promise<OmHandoffProjection> {
 	await runtime.whenObserversIdle();
-	const branch = ctx.sessionManager.getBranch() as Entry[];
+	const branch = canonicalBranch(ctx.sessionManager);
 	const summary = renderSummary(
 		readJourney(runtime.memoryRoot),
 		renderMemoryMap(listTopics(runtime.memoryRoot)),

@@ -1,7 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { postCompactionBaselines } from "../compaction-metrics.js";
 import { activeContextWindow, effectiveCompactionThreshold } from "../compaction-threshold.js";
-import { foldLedger, poolTokens, rawTokensSinceObservationCoverage, sumSessionCost, type Entry } from "../ledger/index.js";
+import {
+	canonicalBranch,
+	foldLedger,
+	poolTokens,
+	rawTokensSinceObservationCoverage,
+	sumSessionCost,
+	type Entry,
+} from "../ledger/index.js";
 import { listTopics, readJourney } from "../memory/paths.js";
 import { estimateStringTokens } from "../tokens.js";
 import type { Runtime } from "../runtime.js";
@@ -17,7 +24,7 @@ export function registerStatusCommand(pi: ExtensionAPI, runtime: Runtime): void 
 				return;
 			}
 			runtime.ensureConfig(ctx.cwd);
-			const branch = ctx.sessionManager.getBranch() as Entry[];
+			const branch = canonicalBranch(ctx.sessionManager);
 			const folded = foldLedger(branch);
 			const sinceObservation = rawTokensSinceObservationCoverage(branch);
 			const contextTokens = ctx.getContextUsage?.()?.tokens ?? null;

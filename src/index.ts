@@ -21,7 +21,7 @@ import { registerCompactionHook } from "./hooks/compaction-hook.js";
 import { registerCompactionTrigger } from "./hooks/compaction-trigger.js";
 import { registerConsolidatorTrigger } from "./hooks/consolidator-trigger.js";
 import { registerObserverTrigger } from "./hooks/observer-trigger.js";
-import { OM_ENABLED, type Entry } from "./ledger/index.js";
+import { OM_ENABLED, canonicalBranch, type Entry } from "./ledger/index.js";
 import { syncMemoryNameIndex } from "./memory/name-index.js";
 import { sessionMemoryRoot } from "./memory/paths.js";
 import { ensureSessionMemory } from "./memory/session.js";
@@ -75,7 +75,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 		if (runtime.enabled) runtime.memoryRoot = ensureSessionMemory(ctx);
 		syncFriendlyIndex(ctx, inheritedName);
 		attachIfEnabled(ctx);
-		runtime.refreshFooterGauges(branch, ctx.getContextUsage?.());
+		runtime.refreshFooterGauges(canonicalBranch(ctx.sessionManager), ctx.getContextUsage?.());
 		runtime.refreshCost(ctx.sessionManager.getEntries() as Entry[]);
 	});
 
@@ -108,7 +108,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 				runtime.memoryRoot = ensureSessionMemory(ctx);
 				syncFriendlyIndex(ctx);
 				attachIfEnabled(ctx);
-				runtime.refreshFooterGauges(ctx.sessionManager.getBranch() as Entry[], ctx.getContextUsage?.());
+				runtime.refreshFooterGauges(canonicalBranch(ctx.sessionManager), ctx.getContextUsage?.());
 				runtime.refreshCost(ctx.sessionManager.getEntries() as Entry[]);
 			} else {
 				runtime.abortAllWorkers();

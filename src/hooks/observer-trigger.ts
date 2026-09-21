@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { assignObservationTimestamps } from "../ids.js";
 import {
+	canonicalBranch,
 	entryIndexForId,
 	foldLedger,
 	latestCoverageMarkerId,
@@ -11,6 +12,7 @@ import {
 	OM_COST,
 	OM_OBSERVATIONS_RECORDED,
 	type Entry,
+	type ProjectionSessionManager,
 	type SourceSlice,
 } from "../ledger/index.js";
 import type { Runtime } from "../runtime.js";
@@ -27,7 +29,7 @@ import {
 type TriggerCtx = {
 	hasUI: boolean;
 	ui?: { notify: (message: string, level?: "info" | "warning" | "error") => void };
-	sessionManager: { getBranch: () => Entry[]; getEntries: () => Entry[] };
+	sessionManager: ProjectionSessionManager & { getEntries: () => Entry[] };
 	getContextUsage?: () => { tokens: number | null; contextWindow?: number } | undefined;
 };
 
@@ -89,7 +91,7 @@ export function evaluateObserverTriggers(pi: ExtensionAPI, runtime: Runtime, ctx
 	const startToastLines: string[] = [];
 
 	while (runtime.observerSlotsAvailable > 0) {
-		const branch = sessionManager.getBranch();
+		const branch = canonicalBranch(sessionManager);
 		const watermarkId = effectiveWatermarkId(runtime, branch);
 		const watermarkIndex = entryIndexForId(branch, watermarkId);
 		const remaining = rawTokensAfterIndex(branch, watermarkIndex);
@@ -108,7 +110,7 @@ export function evaluateObserverTriggers(pi: ExtensionAPI, runtime: Runtime, ctx
 	}
 
 	if (startToastLines.length > 0) ui?.notify(startToastLines.join("\n"), "info");
-	runtime.refreshFooterGauges(sessionManager.getBranch(), ctx.getContextUsage?.());
+	runtime.refreshFooterGauges(canonicalBranch(sessionManager), ctx.getContextUsage?.());
 }
 
 async function dispatchObserver(
@@ -167,7 +169,7 @@ async function dispatchObserver(
 		}
 
 		const result = readObserverResult(runResultPath(runtime.memoryRoot, runId));
-		const branch = ctx.sessionManager.getBranch();
+		const branch = canonicalBranch(ctx.sessionManager);
 		const used = foldLedger(branch).observationsByTimestamp.keys();
 		const observations = assignObservationTimestamps(result.observations, {
 			used,
@@ -178,7 +180,7 @@ async function dispatchObserver(
 			pi.appendEntry(OM_OBSERVATIONS_RECORDED, { observations, coversUpToId });
 		}
 		runtime.status.workerDone(runId, observations.length);
-		runtime.refreshFooterGauges(ctx.sessionManager.getBranch(), ctx.getContextUsage?.());
+		runtime.refreshFooterGauges(canonicalBranch(ctx.sessionManager), ctx.getContextUsage?.());
 		if (ctx.hasUI && ctx.ui) {
 			// Route through the coalescer: if another observer finishes in the same
 			// tick its line joins this one in a single multi-line notify call.

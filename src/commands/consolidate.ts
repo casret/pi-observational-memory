@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { foldLedger, poolTokens, selectPromotionOverflow, type Entry } from "../ledger/index.js";
+import { canonicalBranch, foldLedger, poolTokens, selectPromotionOverflow } from "../ledger/index.js";
 import type { Runtime } from "../runtime.js";
 import { evaluateConsolidatorTrigger } from "../hooks/consolidator-trigger.js";
 
@@ -20,7 +20,7 @@ export function registerConsolidateCommand(pi: ExtensionAPI, runtime: Runtime): 
 				return;
 			}
 			runtime.ensureConfig(ctx.cwd);
-			const branch = ctx.sessionManager.getBranch() as Entry[];
+			const branch = canonicalBranch(ctx.sessionManager);
 			const active = foldLedger(branch).activeObservations;
 			const { promote } = selectPromotionOverflow(active, runtime.config.poolTargetTokens);
 			if (promote.length === 0) {

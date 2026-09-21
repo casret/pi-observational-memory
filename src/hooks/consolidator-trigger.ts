@@ -18,6 +18,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	OM_OBSERVATIONS_DROPPED,
+	canonicalBranch,
 	foldLedger,
 	lastSourceEntryId,
 	observationToLine,
@@ -26,6 +27,7 @@ import {
 	sortObservations,
 	type Entry,
 	type Observation,
+	type ProjectionSessionManager,
 } from "../ledger/index.js";
 import { nowTimestamp } from "../ledger/serialize.js";
 import { renderIndexFile } from "../memory/index-render.js";
@@ -38,7 +40,7 @@ import { recordWorkerCost } from "./observer-trigger.js";
 type TriggerCtx = {
 	hasUI: boolean;
 	ui?: { notify: (message: string, level?: "info" | "warning" | "error") => void };
-	sessionManager: { getBranch: () => Entry[]; getEntries: () => Entry[] };
+	sessionManager: ProjectionSessionManager & { getEntries: () => Entry[] };
 	getContextUsage?: () => { tokens: number | null; contextWindow?: number } | undefined;
 };
 
@@ -83,7 +85,7 @@ export function evaluateConsolidatorTrigger(pi: ExtensionAPI, runtime: Runtime, 
 	if (!runtime.enabled || runtime.config.passive) return;
 	if (runtime.consolidatorInFlight) return;
 
-	const branch = ctx.sessionManager.getBranch();
+	const branch = canonicalBranch(ctx.sessionManager);
 	const active = foldLedger(branch).activeObservations;
 	if (poolTokens(active) < runtime.config.consolidateAtPoolTokens) return;
 
@@ -130,7 +132,7 @@ async function dispatchConsolidator(
 		// Trust the consolidator: on clean exit it has folded (or discarded) everything we handed it.
 		// Re-fold against the CURRENT branch so we never tombstone something already dropped or an
 		// observation an observer committed during this run (those are not in the handed batch).
-		const branch = ctx.sessionManager.getBranch();
+		const branch = canonicalBranch(ctx.sessionManager);
 		const stillActive = new Set(foldLedger(branch).activeObservations.map((o) => o.timestamp));
 		const toDrop = promote.map((o) => o.timestamp).filter((t) => stillActive.has(t));
 
@@ -145,7 +147,7 @@ async function dispatchConsolidator(
 		atomicWrite(indexPath(runtime.memoryRoot), renderIndexFile(listTopics(runtime.memoryRoot)));
 
 		runtime.status.workerDone(runId, toDrop.length);
-		runtime.refreshFooterGauges(ctx.sessionManager.getBranch(), ctx.getContextUsage?.());
+		runtime.refreshFooterGauges(canonicalBranch(ctx.sessionManager), ctx.getContextUsage?.());
 		if (ctx.hasUI && ctx.ui) {
 			runtime.queueToast(`om: consolidator promoted ${toDrop.length} obs`, "info", ctx.ui.notify.bind(ctx.ui));
 		}

@@ -1,3 +1,5 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+
 /**
  * Ledger custom-type vocabulary for observational memory (v1, minimal schema).
  *
@@ -41,6 +43,8 @@ export type Entry = {
 	data?: unknown;
 	details?: unknown;
 	firstKeptEntryId?: string;
+	/** Pi's canonical context contribution for source entries; absent on unprojected test/legacy inputs. */
+	projectedMessages?: AgentMessage[];
 };
 
 /**

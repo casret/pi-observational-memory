@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { buildCompactionProjection, renderSummary } from "../src/ledger/index.js";
-import { canSkipObserverWait, snapCutoff, snapFirstKeptEntryId } from "../src/hooks/compaction-hook.js";
+import { canSkipObserverWait, cutoffMakesProgress, snapCutoff, snapFirstKeptEntryId } from "../src/hooks/compaction-hook.js";
 import {
+	compactionEntry,
 	observation,
 	observationsRecordedEntry,
 	rawMessage,
@@ -49,6 +50,56 @@ describe("snapFirstKeptEntryId", () => {
 	it("falls back to pi's proposed firstKeptEntryId when no boundary qualifies", () => {
 		const branch = [rawMessage("raw-1", body), rawMessage("raw-2", body)];
 		expect(snapFirstKeptEntryId(branch, "raw-2", 5)).toBe("raw-2");
+	});
+
+	it("falls back rather than retaining an over-limit observed tail", () => {
+		const giant = "x".repeat(4000); // 1000 estimated tokens in one source entry
+		const branch = [
+			rawMessage("raw-1", body),
+			observationsRecordedEntry("om-1", { observations: [observation("2026-05-02T10:00:01")], coversUpToId: "raw-1" }),
+			rawMessage("giant", giant),
+			rawMessage("raw-2", body),
+		];
+
+		// Snapping after raw-1 would retain 1010 tokens. Pi's raw-2 proposal is
+		// safer than violating OM's 20-token tail target.
+		expect(snapCutoff(branch, "raw-2", 20)).toEqual({ firstKeptId: "raw-2", tail: undefined });
+	});
+
+	it("falls back when the snapped tail would not shrink the pre-compaction context", () => {
+		const branch = [
+			rawMessage("raw-1", body),
+			observationsRecordedEntry("om-1", { observations: [observation("2026-05-02T10:00:01")], coversUpToId: "raw-1" }),
+			rawMessage("raw-2", body),
+			rawMessage("raw-3", body),
+		];
+		// Candidate tail is 20: inside tailTokens, but equal to the entire
+		// pre-compaction context, so accepting it cannot reduce context pressure.
+		expect(snapCutoff(branch, "raw-3", 20, 20)).toEqual({ firstKeptId: "raw-3", tail: undefined });
+	});
+});
+
+describe("cutoff progress", () => {
+	it("rejects the same or an older cutoff than the latest compaction", () => {
+		const branch = [
+			rawMessage("raw-1", body),
+			rawMessage("raw-2", body),
+			compactionEntry("cmp-1", { firstKeptEntryId: "raw-2" }),
+			rawMessage("raw-3", body),
+		];
+		expect(cutoffMakesProgress(branch, "raw-1")).toBe(false);
+		expect(cutoffMakesProgress(branch, "raw-2")).toBe(false);
+		expect(cutoffMakesProgress(branch, "raw-3")).toBe(true);
+	});
+
+	it("rejects a later cutoff that removes only zero-token source entries", () => {
+		const branch = [
+			rawMessage("raw-1", ""),
+			rawMessage("raw-2", body),
+			compactionEntry("cmp-1", { firstKeptEntryId: "raw-1" }),
+			rawMessage("raw-3", body),
+		];
+		expect(cutoffMakesProgress(branch, "raw-2")).toBe(false);
 	});
 });
 

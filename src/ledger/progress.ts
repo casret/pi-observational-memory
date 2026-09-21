@@ -7,9 +7,17 @@ import {
 } from "./types.js";
 
 const SOURCE_ENTRY_TYPES = new Set(["message", "custom_message", "branch_summary"]);
+const SOURCE_MESSAGE_ROLES = new Set(["user", "assistant", "toolResult", "custom", "branchSummary", "bashExecution"]);
+const CUT_POINT_MESSAGE_ROLES = new Set(["user", "assistant", "custom", "branchSummary", "bashExecution"]);
+
+function projectedRoles(entry: Entry): string[] | undefined {
+	return entry.projectedMessages?.map((message) => message.role);
+}
 
 export function isSourceEntry(entry: Entry): boolean {
-	return SOURCE_ENTRY_TYPES.has(entry.type);
+	if (!SOURCE_ENTRY_TYPES.has(entry.type)) return false;
+	const roles = projectedRoles(entry);
+	return roles === undefined ? true : roles.some((role) => SOURCE_MESSAGE_ROLES.has(role));
 }
 
 /**
@@ -21,6 +29,9 @@ export function isSourceEntry(entry: Entry): boolean {
  * at compaction). Shared by `selectSourceSlice` (chunk cutting) and the compaction snapper.
  */
 export function isValidCutPoint(entry: Entry): boolean {
+	if (!isSourceEntry(entry)) return false;
+	const roles = projectedRoles(entry);
+	if (roles !== undefined) return roles.some((role) => CUT_POINT_MESSAGE_ROLES.has(role));
 	if (entry.type === "custom_message" || entry.type === "branch_summary") return true;
 	if (entry.type === "message") {
 		const role = (entry.message as { role?: string } | undefined)?.role;

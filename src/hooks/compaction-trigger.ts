@@ -1,6 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { activeContextWindow, effectiveCompactionThreshold } from "../compaction-threshold.js";
-import { OM_RESUME, rawTokensSinceLastCompaction, type Entry } from "../ledger/index.js";
+import {
+	OM_RESUME,
+	canonicalBranch,
+	findLastCompactionIndex,
+	rawTokensAfterIndex,
+	rawTokensSinceLastCompaction,
+	type ProjectionSessionManager,
+} from "../ledger/index.js";
 import type { Runtime } from "../runtime.js";
 
 /**
@@ -17,12 +24,12 @@ const RETRYABLE_ERROR_RE =
 	/overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i;
 
 function contextPressureTokens(
-	ctx: { getContextUsage?: () => { tokens: number | null } | undefined; sessionManager: { getBranch: () => Entry[] } },
+	ctx: { getContextUsage?: () => { tokens: number | null } | undefined; sessionManager: ProjectionSessionManager },
 	threshold: number,
 ): { tokens: number; due: boolean } {
 	const live = ctx.getContextUsage?.()?.tokens;
 	if (live != null) return { tokens: live, due: live >= threshold };
-	const raw = rawTokensSinceLastCompaction(ctx.sessionManager.getBranch());
+	const raw = rawTokensSinceLastCompaction(canonicalBranch(ctx.sessionManager));
 	return { tokens: raw, due: raw >= threshold };
 }
 
@@ -76,6 +83,13 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			return;
 		}
 
+		// A completed compaction with no later source entry cannot make progress.
+		// Pi rejects this as "Already compacted" before the before-compact hook can
+		// make the duplicate idempotent, so avoid issuing the request at all.
+		const branch = canonicalBranch(ctx.sessionManager);
+		const lastCompactionIndex = findLastCompactionIndex(branch);
+		if (lastCompactionIndex >= 0 && rawTokensAfterIndex(branch, lastCompactionIndex) === 0) return;
+
 		const threshold = effectiveCompactionThreshold(
 			activeContextWindow(ctx),
 			runtime.config.compactBeforeContextEndTokens,
@@ -115,7 +129,7 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			},
 			onError: (error: { message: string }) => {
 				runtime.compactInFlight = false;
-				if (error.message === "Compaction cancelled") return;
+				if (error.message === "Compaction cancelled" || /already compacted/i.test(error.message)) return;
 				if (hasUI) ui?.notify(`om: ${error.message}`, "error");
 			},
 		});

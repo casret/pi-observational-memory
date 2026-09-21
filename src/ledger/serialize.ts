@@ -1,4 +1,6 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
 
 function pad(n: number): string {
 	return n.toString().padStart(2, "0");
@@ -83,7 +85,10 @@ export function serializeConversation(messages: Message[]): string {
 				if (!body) return null;
 				return `[Assistant @ ${time}]: ${body}`;
 			}
-			return `[Tool result for ${(msg as ToolResultMessage).toolName} @ ${time}]: ${textOnly(msg.content)}`;
+			if (msg.role === "toolResult") {
+				return `[Tool result for ${(msg as ToolResultMessage).toolName} @ ${time}]: ${textOnly(msg.content)}`;
+			}
+			return null;
 		})
 		.filter((line): line is string => line !== null)
 		.join("\n\n");
@@ -97,6 +102,7 @@ export type RenderableEntry = {
 	customType?: string;
 	content?: unknown;
 	summary?: unknown;
+	projectedMessages?: AgentMessage[];
 };
 
 function renderCustomMessage(entry: RenderableEntry): string {
@@ -117,6 +123,11 @@ function renderCustomMessage(entry: RenderableEntry): string {
 export function serializeBranchEntries(entries: RenderableEntry[]): string {
 	const blocks: string[] = [];
 	for (const entry of entries) {
+		if (entry.projectedMessages !== undefined) {
+			const part = serializeConversation(convertToLlm(entry.projectedMessages));
+			if (part) blocks.push(part);
+			continue;
+		}
 		if (entry.type === "message" && entry.message) {
 			const part = serializeConversation([entry.message as Message]);
 			if (part) blocks.push(part);

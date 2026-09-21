@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./canonical.js";
 export * from "./fold.js";
 export * from "./progress.js";
 export * from "./projection.js";
