@@ -3,14 +3,21 @@
  * reads topic files with ordinary `ls`/`read`/`grep`. Topic files are NOT rolled back by `/tree`
  * (they track the repo, not the session branch).
  *
- * Layout under <project>/.memory/:
- *   INDEX.md            — orchestrator-owned; (re)rendered from topic front-matter
- *   <topic>.md          — consolidator-authored; YAML front-matter + current-state prose
- *   .runs/<id>.json     — transient worker IPC (not GC'd in v1)
+ * Each session's memory lives NEXT TO its transcript, never inside the project tree (where it
+ * leaked into version control and died with deleted workspaces):
+ *   ~/.pi/agent/sessions/<cwd-slug>/<ts>_<uuid>.jsonl    — Pi's session transcript
+ *   ~/.pi/agent/sessions/<cwd-slug>/<ts>_<uuid>.memory/  — this session's memory root:
+ *     INDEX.md          — orchestrator-owned; (re)rendered from topic front-matter
+ *     JOURNEY.md        — consolidator-authored running history
+ *     <topic>.md        — consolidator-authored; YAML front-matter + current-state prose
+ *     .runs/<id>.*      — transient worker IPC; deleted on success, swept after a day
+ * Sessions without a transcript file (in-memory/--no-session) get an explicitly ephemeral root
+ * under the OS temp dir. `~/.pi/agent/om-memory/<name>--<id>` symlinks follow session names.
  *
  * All writes are atomic (temp + rename) so a reader never sees a half-written file.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 
 export const INDEX_FILENAME = "INDEX.md";
@@ -21,19 +28,30 @@ export const INDEX_FILENAME = "INDEX.md";
  */
 export const JOURNEY_FILENAME = "JOURNEY.md";
 
-/** The project-level `.memory/` base. Per-session roots live one level below it. */
-export function memoryBaseDir(cwd: string): string {
-	return join(cwd, ".memory");
+/** Suffix replacing `.jsonl` on the session transcript to name its memory root. */
+export const MEMORY_DIR_SUFFIX = ".memory";
+
+/** The memory root beside a session transcript: `<ts>_<uuid>.jsonl` → `<ts>_<uuid>.memory/`. */
+export function sessionFileMemoryRoot(sessionFile: string): string {
+	return `${sessionFile.replace(/\.jsonl$/, "")}${MEMORY_DIR_SUFFIX}`;
+}
+
+/** Root for a session that has no transcript file: it cannot be resumed, so memory is ephemeral. */
+export function ephemeralMemoryRoot(sessionId: string): string {
+	return join(tmpdir(), "pi-om-ephemeral", sessionId.replace(/[^A-Za-z0-9-]/g, "-") || "unknown");
 }
 
 /**
- * The per-session memory root: `.memory/<sessionId>/`. All durable long-term memory (INDEX,
- * topic files, JOURNEY) and transient `.runs/` IPC are scoped under here so two sessions in the
- * same project never share consolidator output. Keyed by the immutable session header id
- * (survives /name, /resume, /tree) — NOT the session filename or display name.
+ * Resolve a session's memory root. Keyed by the transcript path Pi assigns (whose filename embeds
+ * the immutable session id), so memory is found wherever the session is resumed from.
  */
-export function sessionMemoryRoot(cwd: string, sessionId: string): string {
-	return join(memoryBaseDir(cwd), sessionId);
+export function sessionMemoryRoot(sessionFile: string | undefined, sessionId: string): string {
+	return sessionFile ? sessionFileMemoryRoot(sessionFile) : ephemeralMemoryRoot(sessionId);
+}
+
+/** Pre-migration location: `<project>/.memory/<sessionId>/`. Read only to migrate it out. */
+export function legacySessionMemoryRoot(cwd: string, sessionId: string): string {
+	return join(cwd, ".memory", sessionId);
 }
 
 export function indexPath(root: string): string {
@@ -86,7 +104,7 @@ export type TopicFrontMatter = {
 };
 
 export type Topic = TopicFrontMatter & {
-	/** Path relative to the project root, e.g. ".memory/auth.md". */
+	/** Absolute path, so the master can `read` it regardless of its cwd. */
 	path: string;
 	/** Bare filename, e.g. "auth.md". */
 	filename: string;
@@ -123,12 +141,11 @@ export function parseFrontMatter(content: string): { front: TopicFrontMatter; bo
 
 /**
  * List parsed topic files (every `*.md` except INDEX.md/JOURNEY.md) under a session memory
- * root, sorted by filename. Each topic's `path` is rendered relative to the project cwd (e.g.
- * `.memory/<sessionId>/auth.md`) so the master can `read`/`grep` it directly from the map.
+ * root, sorted by filename. Each topic's `path` is absolute (memory no longer lives under the
+ * project cwd) so the master can `read`/`grep` it directly from the map.
  */
 export function listTopics(root: string): Topic[] {
 	if (!existsSync(root)) return [];
-	const cwd = resolve(root, "..", "..");
 	const topics: Topic[] = [];
 	for (const filename of readdirSync(root)) {
 		if (!filename.endsWith(".md") || filename === INDEX_FILENAME || filename === JOURNEY_FILENAME) continue;
@@ -139,7 +156,7 @@ export function listTopics(root: string): Topic[] {
 			continue;
 		}
 		const { front } = parseFrontMatter(content);
-		topics.push({ ...front, path: relative(cwd, join(root, filename)), filename });
+		topics.push({ ...front, path: resolve(root, filename), filename });
 	}
 	topics.sort((a, b) => (a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0));
 	return topics;

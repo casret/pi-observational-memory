@@ -2,7 +2,7 @@
 
 Tiered, subprocess-backed memory for pi.
 
-Parallel **observers** distill raw conversation chunks into atomic observations committed to the master's branch-local **ledger** (so memory stays correct under `/tree`); a deterministic, model-free **compaction** renders that buffer verbatim into the compaction block. A **consolidator** promotes the oldest observations into durable `.memory/<sessionId>/` topic files, bounding the buffer and giving each session its own durable, `grep`-able long-term memory (a fork seeds its memory from its parent).
+Parallel **observers** distill raw conversation chunks into atomic observations committed to the master's branch-local **ledger** (so memory stays correct under `/tree`); a deterministic, model-free **compaction** renders that buffer verbatim into the compaction block. A **consolidator** promotes the oldest observations into durable per-session topic files stored beside the session transcript, bounding the buffer and giving each session its own durable, `grep`-able long-term memory (a fork seeds its memory from its parent).
 
 ## On/off gate (default ON)
 
@@ -24,7 +24,7 @@ flowchart LR
     D["master ledger<br/><i>branch-local, /tree-correct</i>"]
     E["compaction block<br/><i>deterministic, model-free</i>"]
     F["consolidator<br/><i>subprocess pi, one at a time</i>"]
-    G[".memory/&lt;session&gt;/&lt;topic&gt;.md + INDEX.md<br/><i>durable, per-session, grep-able;<br/>tombstones drain buffer</i>"]
+    G["&lt;session&gt;.memory/&lt;topic&gt;.md + INDEX.md<br/><i>durable, per-session, grep-able;<br/>tombstones drain buffer</i>"]
 
     A --> B --> C --> D --> E
     D -- "oldest overflow<br/>(pool > consolidateAtPoolTokens)" --> F --> G
@@ -42,7 +42,7 @@ consolidator draining the oldest observations into durable per-session memory fi
   (the observer only emits minute resolution).
 - **Compaction** (`turn_end` when live usage reaches the active model's context window minus
   `compactBeforeContextEndTokens`): waits for in-flight observers, then renders the active buffer plus a **memory map** (rendered live from
-  `.memory/<session>/` topic front-matter) and a **journey** section (`.memory/<session>/JOURNEY.md`, read
+  `<session>.memory/` topic front-matter) and a **journey** section (`<session>.memory/JOURNEY.md`, read
   verbatim). The cutoff snaps to an observation chunk boundary so the verbatim tail is never
   double-represented.
 - **Handoff integration** (`/handoff`, when the 0mux handoff extension is installed): an
@@ -54,9 +54,9 @@ consolidator draining the oldest observations into durable per-session memory fi
   link before the kickoff turn. OM-off handoffs are unchanged.
 - **Consolidator clock** (`turn_end` / `agent_start`): when the active observation pool
   exceeds `consolidateAtPoolTokens`, a single background consolidator subprocess folds the
-  **oldest** observations (above `poolTargetTokens`) into durable `.memory/<session>/<topic>.md`
+  **oldest** observations (above `poolTargetTokens`) into durable `<session>.memory/<topic>.md`
   files, then the orchestrator tombstones exactly the observations it reports — draining the
-  buffer back toward target. Topic files are **scoped per session** (`.memory/<sessionId>/`,
+  buffer back toward target. Topic files are **scoped per session** (`<ts>_<sessionId>.memory/` beside the transcript,
   keyed by the immutable session-header id, so two sessions in the same project never share
   output) and track the session, not the branch: they are **not** rolled back by `/tree`. On a
   fork/clone the new session's memory is **seeded once** from the parent (matching the ledger,
@@ -64,12 +64,12 @@ consolidator draining the oldest observations into durable per-session memory fi
   topic front-matter after each run; the consolidator touches `<topic>.md` files plus
   `JOURNEY.md`, via its own `read`/`write`/`edit`/`ls`/`grep` tools scoped to the session dir.
 - **Friendly-name index** (`~/.pi/agent/om-memory/`): a global, secondary index of symlinks
-  to the canonical per-project roots. Entries put the mutable session display name first and
-  append the immutable short id for collision safety, for example
-  `connect-out--01a05dd9 -> /project/.memory/01a05dd9-…`. `/name` renames the link without
-  moving memory; unnamed sessions appear as `unnamed--<short-id>`. Existing unrelated paths
+  to the canonical memory roots beside each transcript. Entries put the mutable session display
+  name first and append the immutable short id for collision safety, for example
+  `connect-out--01a05dd9 -> ~/.pi/agent/sessions/--project--/<ts>_01a05dd9-….memory`. `/name`
+  renames the link without moving memory; sessions without a transcript are not indexed; unnamed sessions appear as `unnamed--<short-id>`. Existing unrelated paths
   are never overwritten, and failure to create a symlink never blocks the memory pipeline.
-- **Journey** (`.memory/<session>/JOURNEY.md`): a single, whole-project, purely **descriptive** prose
+- **Journey** (`<session>.memory/JOURNEY.md`): a single, whole-project, purely **descriptive** prose
   history of how the work got to its current state, maintained by the consolidator and pushed
   into every compaction block for **orientation** (not recall, not instructions). It is
   append-mostly: each consolidation adds a short dated segment and compresses the oldest
@@ -78,15 +78,16 @@ consolidator draining the oldest observations into durable per-session memory fi
 
 Each worker is an **ordinary recorded pi session** in the global store
 (`~/.pi/agent/sessions`, under the project path) — open it in the session browser to see the
-exact input chunk, tool calls, and output. Transient handoff files live in
-`<project>/.memory/<sessionId>/.runs/`.
+exact input chunk, tool calls, and output. Transient handoff files live in the session memory
+root's `.runs/`; a successful run deletes its files, and anything older than a day is swept at
+session start.
 
 ### Cost tracking
 
 Every worker is a `pi` subprocess, so its spend is captured from pi's **built-in**
 `usage.cost.total` (reliable, already computed). The worker extension — *not* the model —
 accumulates that figure and hands it back via the run's cost file
-(`.memory/<session>/.runs/<runId>.cost.json`), alongside the existing observation IPC. The orchestrator
+(`<session>.memory/.runs/<runId>.cost.json`), alongside the existing observation IPC. The orchestrator
 folds each run into an `om.cost` ledger entry.
 
 - **Ephemeral-safe:** cost rides the result-file IPC, never a saved session log, so it works
@@ -152,8 +153,15 @@ npm run typecheck # tsc --noEmit
 
 Layout: `src/` is the master-side orchestrator (entry `src/index.ts`); `agent/` is the shared
 worker extension loaded into subprocesses via `-e` (`OM_WORKER=observer|consolidator`).
-Long-term memory lives under `<project>/.memory/<sessionId>/` (`INDEX.md` + `<topic>.md` +
-`JOURNEY.md`), keyed by the immutable session-header id so sessions in the same project stay
-isolated; a fork seeds its dir from the parent's on first touch. `~/.pi/agent/om-memory/`
-provides friendly-name symlinks across projects without changing those canonical paths.
-Transient worker IPC lives under `<project>/.memory/<sessionId>/.runs/`.
+Long-term memory (`INDEX.md` + `<topic>.md` + `JOURNEY.md`) lives beside the session
+transcript: `~/.pi/agent/sessions/<cwd-slug>/<ts>_<sessionId>.jsonl` →
+`<ts>_<sessionId>.memory/`. Nothing is written into the project tree, so memory cannot leak into
+version control or vanish with a deleted workspace. A fork/handoff seeds its root from the
+parent's on first touch. Sessions without a transcript file use an explicitly ephemeral root under
+the OS temp dir. `~/.pi/agent/om-memory/` provides friendly-name symlinks without changing those
+canonical paths. Transient worker IPC lives under the root's `.runs/`.
+
+**Migration:** releases before this layout wrote `<project>/.memory/<sessionId>/`. A session
+moves its own legacy root beside its transcript the first time it starts (dropping `.runs/`, and
+removing `<project>/.memory/` if that leaves it empty). `node scripts/migrate-memory.mjs`
+lists every remaining legacy root, orphan, and dangling index link; `--apply` performs the moves.

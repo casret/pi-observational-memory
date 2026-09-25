@@ -15,6 +15,7 @@ import {
 	type ProjectionSessionManager,
 	type SourceSlice,
 } from "../ledger/index.js";
+import { removeRunFiles } from "../memory/session.js";
 import type { Runtime } from "../runtime.js";
 import { buildWorkerArgv, buildWorkerEnv, spawnWorker } from "../spawn/launch.js";
 import {
@@ -180,6 +181,9 @@ async function dispatchObserver(
 			pi.appendEntry(OM_OBSERVATIONS_RECORDED, { observations, coversUpToId });
 		}
 		runtime.status.workerDone(runId, observations.length);
+		// Committed to the ledger and cost recorded: the transient IPC files are no longer needed.
+		// Failed runs keep theirs (swept after a day) for debugging.
+		if (!runtime.config.debugLog) removeRunFiles(runtime.memoryRoot, runId);
 		runtime.refreshFooterGauges(canonicalBranch(ctx.sessionManager), ctx.getContextUsage?.());
 		if (ctx.hasUI && ctx.ui) {
 			// Route through the coalescer: if another observer finishes in the same

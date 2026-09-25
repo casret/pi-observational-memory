@@ -48,7 +48,7 @@ export function renderMemoryMap(topics: Topic[]): string | undefined {
 	if (topics.length === 0) return undefined;
 	const lines: string[] = [
 		"## Memory map",
-		"Durable long-term notes live in `.memory/`. Read a file when a topic below looks relevant; these summaries are intentionally terse.",
+		"Durable long-term notes for this session (absolute paths). Read a file when a topic below looks relevant; these summaries are intentionally terse.",
 	];
 	for (const topic of topics) {
 		const updated = topic.updated ? ` (updated ${topic.updated})` : "";

@@ -32,6 +32,7 @@ import {
 import { nowTimestamp } from "../ledger/serialize.js";
 import { renderIndexFile } from "../memory/index-render.js";
 import { atomicWrite, indexPath, listTopics, readJourney } from "../memory/paths.js";
+import { removeRunFiles } from "../memory/session.js";
 import type { Runtime } from "../runtime.js";
 import { buildWorkerArgv, buildWorkerEnv, spawnWorker } from "../spawn/launch.js";
 import { runPromptPath, writeWorkerPrompt } from "../spawn/runs.js";
@@ -147,6 +148,7 @@ async function dispatchConsolidator(
 		atomicWrite(indexPath(runtime.memoryRoot), renderIndexFile(listTopics(runtime.memoryRoot)));
 
 		runtime.status.workerDone(runId, toDrop.length);
+		if (!runtime.config.debugLog) removeRunFiles(runtime.memoryRoot, runId);
 		runtime.refreshFooterGauges(canonicalBranch(ctx.sessionManager), ctx.getContextUsage?.());
 		if (ctx.hasUI && ctx.ui) {
 			runtime.queueToast(`om: consolidator promoted ${toDrop.length} obs`, "info", ctx.ui.notify.bind(ctx.ui));

@@ -53,7 +53,10 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 
 	function syncFriendlyIndex(ctx: any, name = pi.getSessionName()): void {
 		const sessionId = ctx.sessionManager.getSessionId();
-		syncMemoryNameIndex(sessionMemoryRoot(ctx.cwd, sessionId), sessionId, name);
+		const sessionFile = ctx.sessionManager.getSessionFile?.();
+		// A session without a transcript cannot be resumed; don't index its ephemeral memory.
+		if (!sessionFile) return;
+		syncMemoryNameIndex(sessionMemoryRoot(sessionFile, sessionId), sessionId, name);
 	}
 
 	pi.on("session_start", (_event: unknown, ctx: any) => {

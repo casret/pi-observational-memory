@@ -63,7 +63,7 @@ describe("listTopics", () => {
 		writeTopic("auth.md", "---\nid: auth\ntitle: Auth\nsummary: a\n---\nbody");
 		const topics = listTopics(root);
 		expect(topics.map((t) => t.filename)).toEqual(["auth.md", "zebra.md"]);
-		expect(topics[0]).toMatchObject({ id: "auth", title: "Auth", summary: "a", path: join(".memory", "sess-1", "auth.md") });
+		expect(topics[0]).toMatchObject({ id: "auth", title: "Auth", summary: "a", path: join(root, "auth.md") });
 	});
 
 	it("returns [] when the session memory root does not exist", () => {
@@ -98,11 +98,11 @@ describe("renderIndexFile / renderMemoryMap", () => {
 		const topics = listTopics(root);
 		const index = renderIndexFile(topics);
 		expect(index).toContain("## Auth");
-		expect(index).toContain("`.memory/sess-1/auth.md`");
+		expect(index).toContain(`\`${join(root, "auth.md")}\``);
 		expect(index).toContain("JWT and sessions");
 		const map = renderMemoryMap(topics);
 		expect(map).toContain("## Memory map");
-		expect(map).toContain("`.memory/sess-1/auth.md` — JWT and sessions (updated 2026-06-25 14:00)");
+		expect(map).toContain(`\`${join(root, "auth.md")}\` — JWT and sessions (updated 2026-06-25 14:00)`);
 	});
 });
 
