@@ -44,7 +44,7 @@ function legacy(id: string, body = "memory"): string {
 
 const run = (...args: string[]) =>
 	execFileSync(process.execPath, [SCRIPT, "--json", ...args], {
-		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, HOME: temp },
 		encoding: "utf8",
 	});
 
@@ -105,5 +105,25 @@ describe("migrate-memory.mjs", () => {
 		expect(existsSync(join(project, ".memory", "live", "topic.md"))).toBe(true);
 		expect(readFileSync(join(project, ".memory", "both", "topic.md"), "utf8")).toBe("legacy copy");
 		expect(readFileSync(join(conflicted.replace(/\.jsonl$/, ".memory"), "topic.md"), "utf8")).toBe("new copy");
+	});
+
+	it("finds stray memory in other workspaces a session ran from, and removes .runs-only copies", () => {
+		const file = session("roam"); // header cwd = project
+		const target = file.replace(/\.jsonl$/, ".memory");
+		mkdirSync(target, { recursive: true });
+		writeFileSync(join(target, "topic.md"), "real memory");
+		const elsewhere = join(temp, "other-workspace", ".memory", "roam", ".runs");
+		mkdirSync(elsewhere, { recursive: true });
+		writeFileSync(join(elsewhere, "obs-1.result.json"), "{}");
+		const strayWithMemory = join(temp, "third-workspace", ".memory", "roam");
+		mkdirSync(strayWithMemory, { recursive: true });
+		writeFileSync(join(strayWithMemory, "topic.md"), "divergent copy");
+
+		const plan = JSON.parse(run("--apply"));
+		expect(existsSync(join(temp, "other-workspace", ".memory"))).toBe(false);
+		// A stray copy with real memory next to an existing root is a conflict: never touched.
+		expect(plan.conflict.map((m: { legacy: string }) => m.legacy)).toEqual([strayWithMemory]);
+		expect(readFileSync(join(strayWithMemory, "topic.md"), "utf8")).toBe("divergent copy");
+		expect(readFileSync(join(target, "topic.md"), "utf8")).toBe("real memory");
 	});
 });

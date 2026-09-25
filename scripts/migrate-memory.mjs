@@ -6,6 +6,9 @@
 //   node scripts/migrate-memory.mjs --apply    move MOVE entries, repoint/remove index links
 //   --live-minutes N   treat sessions whose transcript changed within N minutes as live (default 30)
 //   --json             machine-readable plan
+//   --scan-root DIR    extra directory to search for stray `.memory/` dirs (repeatable;
+//                      default: $HOME to depth 4). A session can run from several cwds, so
+//                      transcript header cwds alone miss memory left in later workspaces.
 //
 // Never deleted or merged: conflicts (both roots exist), non-empty orphans (memory with no
 // transcript), and anything that may be live (recent transcript activity or a process cwd inside
@@ -119,6 +122,46 @@ for (const e of existsSync(indexDir) ? readdirSync(indexDir) : []) {
 }
 
 // 3. Classify every legacy root found under a known cwd.
+// Stray `.memory/` dirs anywhere under the scan roots (skipping Pi's own store and big trees).
+const scanRoots = [];
+for (let i = 0; i < args.length; i++) if (args[i] === "--scan-root" && args[i + 1]) scanRoots.push(resolve(args[++i]));
+if (scanRoots.length === 0) scanRoots.push(homedir());
+const SKIP_DIRS = new Set(["node_modules", "target", ".git", ".jj", ".cache", ".local", ".npm", ".cargo", ".rustup"]);
+function findMemoryDirs(dir, depth) {
+	if (depth < 0) return;
+	let entries;
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return;
+	}
+	for (const d of entries) {
+		if (!d.isDirectory() || d.isSymbolicLink()) continue;
+		const full = join(dir, d.name);
+		if (d.name === ".memory") cwds.add(dir);
+		else if (!SKIP_DIRS.has(d.name) && full !== agentDir && !full.startsWith(`${agentDir}/`)) findMemoryDirs(full, depth - 1);
+	}
+}
+for (const root of scanRoots) findMemoryDirs(root, 4);
+cwds.add("/tmp");
+
+// True when every file under a root lives in `.runs/` (transient worker IPC only).
+function transientOnly(root) {
+	let only = true;
+	const walk = (p, inRuns) => {
+		let st;
+		try {
+			st = lstatSync(p);
+		} catch {
+			return;
+		}
+		if (st.isDirectory()) for (const e of readdirSync(p)) walk(join(p, e), inRuns || e === ".runs");
+		else if (!inRuns) only = false;
+	};
+	walk(root, false);
+	return only;
+}
+
 const plan = { move: [], conflict: [], live: [], orphan: [], emptyOrphan: [], danglingLinks: [], relink: [] };
 const now = Date.now();
 for (const cwd of cwds) {
@@ -135,15 +178,17 @@ for (const cwd of cwds) {
 		const t = transcripts.get(d.name);
 		const size = du(legacy);
 		const item = { legacy, sessionId: d.name, size: size.total, runs: size.runs };
+		// Only transient `.runs/` scratch (or nothing): no memory to keep, whatever the transcript.
+		const scratch = transientOnly(legacy) && !busyIn(legacy);
 		if (!t) {
 			const o = { ...item, mtime: statSync(legacy).mtimeMs };
-			(size.total === 0 && !busyIn(legacy) ? plan.emptyOrphan : plan.orphan).push(o);
+			(scratch ? plan.emptyOrphan : plan.orphan).push(o);
 			continue;
 		}
 		item.target = t.target;
 		item.transcript = t.file;
 		const recent = now - statSync(t.file).mtimeMs < LIVE_MS;
-		if (existsSync(t.target)) plan.conflict.push(item);
+		if (existsSync(t.target)) (scratch ? plan.emptyOrphan : plan.conflict).push({ ...item, mtime: statSync(legacy).mtimeMs });
 		else if (recent || busyIn(legacy)) plan.live.push({ ...item, reason: busyIn(legacy) ? "process cwd inside" : "transcript active recently" });
 		else plan.move.push(item);
 	}
@@ -188,7 +233,7 @@ if (JSON_OUT) {
 	for (const m of plan.live) console.log(`  ${m.legacy}  [${m.reason}]`);
 	console.log(`\nCONFLICT ${plan.conflict.length} (both legacy and new roots exist; resolve by hand)`);
 	for (const m of plan.conflict) console.log(`  ${m.legacy}\n    vs ${m.target}`);
-	console.log(`\nEMPTY-ORPHAN ${plan.emptyOrphan.length} (no transcript, no files; removed with --apply)`);
+	console.log(`\nEMPTY-ORPHAN ${plan.emptyOrphan.length} (no memory files — empty or .runs scratch only; removed with --apply)`);
 	console.log(`\nORPHAN ${plan.orphan.length} (memory with no transcript; kept — decide per entry)`);
 	for (const m of plan.orphan) console.log(`  ${m.legacy}  ${human(m.size)}  last ${new Date(m.mtime).toISOString().slice(0, 10)}`);
 	console.log(`\nINDEX links: repoint ${plan.relink.length}, remove dangling ${plan.danglingLinks.length}`);
