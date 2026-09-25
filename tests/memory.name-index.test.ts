@@ -81,4 +81,30 @@ describe("syncMemoryNameIndex", () => {
 		expect(syncMemoryNameIndex(missing, "session", "name", indexDir)).toBeUndefined();
 		expect(existsSync(indexDir)).toBe(false);
 	});
+
+	it("reclaims this session's dangling link after its root moved (migration)", () => {
+		const sessionId = "01a04474-full-id";
+		const legacyRoot = join(temp, "project", ".memory", sessionId); // pre-migration root (now gone)
+		mkdirSync(indexDir, { recursive: true });
+		symlinkSync(legacyRoot, join(indexDir, "0mux--01a04474"));
+		const fullIdLeftover = join(indexDir, `0mux--${sessionId}`);
+		rmSync(legacyRoot, { recursive: true, force: true });
+		const newRoot = join(temp, "sessions", "--project--", `2026-09-25T00-00-00-000Z_${sessionId}.memory`);
+		mkdirSync(newRoot, { recursive: true });
+		symlinkSync(newRoot, fullIdLeftover); // fallback link the buggy release created
+
+		const link = syncMemoryNameIndex(newRoot, sessionId, "0mux", indexDir);
+		expect(link).toBe(join(indexDir, "0mux--01a04474"));
+		expect(readlinkSync(link!)).toBe(resolve(newRoot));
+		expect(() => lstatSync(fullIdLeftover)).toThrow();
+	});
+
+	it("never reclaims a dangling link that belonged to a different session", () => {
+		mkdirSync(indexDir, { recursive: true });
+		const foreign = join(indexDir, "0mux--01a04474");
+		symlinkSync(join(temp, "gone", ".memory", "01a04474-other-session"), foreign);
+		const link = syncMemoryNameIndex(memoryRoot, "01a04474-full-id", "0mux", indexDir);
+		expect(link).toBe(join(indexDir, "0mux--01a04474-full-id"));
+		expect(readlinkSync(foreign)).toBe(join(temp, "gone", ".memory", "01a04474-other-session"));
+	});
 });

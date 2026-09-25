@@ -7,7 +7,7 @@ import {
 	symlinkSync,
 	unlinkSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 /** Global, human-browsable index of per-project observational-memory roots. */
@@ -51,10 +51,23 @@ function symlinkTarget(indexDir: string, path: string): string | undefined {
 	}
 }
 
-function pathAvailableFor(indexDir: string, path: string, memoryRoot: string): boolean {
-	return !existsSync(path) && symlinkTarget(indexDir, path) === undefined
-		? true
-		: symlinkTarget(indexDir, path) === resolve(memoryRoot);
+/**
+ * A link is this session's own when it resolves to the current root, or when it is DANGLING and
+ * its target was one of this session's roots (a legacy `<project>/.memory/<id>` or an earlier
+ * `<ts>_<id>.memory`). Migration moves the root, so the old link dangles but still names it.
+ */
+function isOwnLink(indexDir: string, path: string, memoryRoot: string, sessionId: string): boolean {
+	const target = symlinkTarget(indexDir, path);
+	if (target === undefined) return false;
+	if (target === resolve(memoryRoot)) return true;
+	if (existsSync(path)) return false;
+	const name = basename(target);
+	return name === sessionId || name.endsWith(`_${sessionId}.memory`);
+}
+
+function pathAvailableFor(indexDir: string, path: string, memoryRoot: string, sessionId: string): boolean {
+	if (!existsSync(path) && symlinkTarget(indexDir, path) === undefined) return true;
+	return isOwnLink(indexDir, path, memoryRoot, sessionId);
 }
 
 /**
@@ -75,21 +88,23 @@ export function syncMemoryNameIndex(
 		const resolvedRoot = resolve(memoryRoot);
 		const preferred = join(indexDir, memoryNameLinkName(sessionName, sessionId));
 		const fullIdFallback = join(indexDir, `${safeSessionName(sessionName)}--${safeSessionId(sessionId)}`);
-		const destination = pathAvailableFor(indexDir, preferred, resolvedRoot)
+		const destination = pathAvailableFor(indexDir, preferred, resolvedRoot, sessionId)
 			? preferred
-			: pathAvailableFor(indexDir, fullIdFallback, resolvedRoot)
+			: pathAvailableFor(indexDir, fullIdFallback, resolvedRoot, sessionId)
 				? fullIdFallback
 				: undefined;
 		if (!destination) return undefined;
 
-		// Create directly with EEXIST semantics so a racing unrelated file is never replaced.
 		if (symlinkTarget(indexDir, destination) !== resolvedRoot) {
+			// Only this session's own stale link is ever replaced; create with EEXIST semantics
+			// so a racing unrelated file is never clobbered.
+			if (symlinkTarget(indexDir, destination) !== undefined) unlinkSync(destination);
 			symlinkSync(resolvedRoot, destination, "dir");
 		}
 
 		for (const entry of readdirSync(indexDir)) {
 			const path = join(indexDir, entry);
-			if (path !== destination && symlinkTarget(indexDir, path) === resolvedRoot) {
+			if (path !== destination && isOwnLink(indexDir, path, resolvedRoot, sessionId)) {
 				unlinkSync(path);
 			}
 		}
