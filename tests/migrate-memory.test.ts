@@ -74,6 +74,7 @@ describe("migrate-memory.mjs", () => {
 		mkdirSync(index, { recursive: true });
 		symlinkSync(join(project, ".memory", "aaa"), join(index, "named--aaa"));
 		symlinkSync(join(temp, "gone", ".memory", "zzz"), join(index, "gone--zzz"));
+		symlinkSync(join(project, ".memory", "no-transcript-empty"), join(index, "empty--nnn"));
 
 		run("--apply");
 
@@ -85,6 +86,8 @@ describe("migrate-memory.mjs", () => {
 		expect(readFileSync(join(project, ".memory", "no-transcript-full", "topic.md"), "utf8")).toBe("orphan body");
 		expect(readlinkSync(join(index, "named--aaa"))).toBe(target);
 		expect(() => lstatSync(join(index, "gone--zzz"))).toThrow();
+		// Links to removed empty orphans are cleaned up in the same pass.
+		expect(() => lstatSync(join(index, "empty--nnn"))).toThrow();
 	});
 
 	it("skips sessions with recent transcript activity and never overwrites an existing target", () => {

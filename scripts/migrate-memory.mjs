@@ -169,9 +169,12 @@ for (const slug of existsSync(sessionsDir) ? readdirSync(sessionsDir) : []) {
 	}
 }
 const movedFrom = new Map(plan.move.map((m) => [m.legacy, m.target]));
+// Links to empty orphans become dangling once those are removed; plan their removal now so a
+// single --apply leaves no dangling links.
+const removing = new Set(plan.emptyOrphan.map((o) => o.legacy));
 for (const l of links) {
 	if (movedFrom.has(l.target)) plan.relink.push({ ...l, to: movedFrom.get(l.target) });
-	else if (!existsSync(l.target)) plan.danglingLinks.push(l);
+	else if (!existsSync(l.target) || removing.has(l.target)) plan.danglingLinks.push(l);
 }
 
 if (JSON_OUT) {
