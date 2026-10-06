@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { registerCompactionHook } from "../src/hooks/compaction-hook.js";
-import { registerCompactionTrigger } from "../src/hooks/compaction-trigger.js";
+import { OM_RESUME_PENDING_EVENT, registerCompactionTrigger } from "../src/hooks/compaction-trigger.js";
 import { Runtime } from "../src/runtime.js";
 import { compactionEntry, rawMessage } from "./fixtures/session.js";
 
@@ -111,6 +111,54 @@ describe("model-aware compaction trigger", () => {
 		expect(runtime.compactInFlight).toBe(false);
 		expect(sent).toHaveLength(1);
 		expect(notifications.some((message) => message.includes("Nothing to compact"))).toBe(false);
+	});
+});
+
+describe("mid-run compaction announces its resume turn", () => {
+	function run(compact: (o: any) => void, sendMessage: () => void = () => undefined, toolResults: unknown[] = [{}]) {
+		const runtime = new Runtime();
+		runtime.enabled = true;
+		const events: any[] = [];
+		let handler: ((event: unknown, ctx: any) => void) | undefined;
+		registerCompactionTrigger({
+			on: (event: string, candidate: typeof handler) => { if (event === "turn_end") handler = candidate; },
+			sendMessage,
+			events: { emit: (name: string, payload: unknown) => events.push([name, payload]) },
+		} as any, runtime);
+		handler!(
+			{ message: { role: "assistant", stopReason: "toolUse" }, toolResults },
+			{
+				getContextUsage: () => ({ tokens: 950_000, contextWindow: 1_000_000 }),
+				sessionManager: { getBranch: () => [rawMessage("raw-1", "x".repeat(1000))] },
+				hasUI: false,
+				compact,
+			},
+		);
+		return events.filter(([n]) => n === OM_RESUME_PENDING_EVENT).map(([, p]) => p);
+	}
+
+	it("signals pending, then started once the resume turn is triggered", () => {
+		const seen = run((o) => o.onComplete());
+		expect(seen).toEqual([{ pending: true }, { pending: false, started: true }]);
+	});
+
+	it("signals started:false when the resume cannot be sent", () => {
+		const seen = run((o) => o.onComplete(), () => { throw new Error("boom"); });
+		expect(seen).toEqual([{ pending: true }, { pending: false, started: false }]);
+	});
+
+	it("signals started:false when compaction is cancelled or fails", () => {
+		expect(run((o) => o.onError({ message: "Compaction cancelled" }))).toEqual([{ pending: true }, { pending: false, started: false }]);
+		expect(run((o) => o.onError({ message: "Summarization failed" }))).toEqual([{ pending: true }, { pending: false, started: false }]);
+	});
+
+	it("still resumes and signals started when Pi's compaction won the race", () => {
+		const seen = run((o) => o.onError({ message: "Nothing to compact (session too small)" }));
+		expect(seen).toEqual([{ pending: true }, { pending: false, started: true }]);
+	});
+
+	it("does not signal for a terminal turn (nothing will resume)", () => {
+		expect(run((o) => o.onComplete(), () => undefined, [])).toEqual([]);
 	});
 });
 

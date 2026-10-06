@@ -19,6 +19,15 @@ const RESUME_PROMPT =
 	"[automatic] Your context was just compacted to free space; no user message was sent. " +
 	"Continue exactly where you left off, as if the compaction had not happened.";
 
+/**
+ * Cross-extension signal on pi.events: a mid-run compaction is aborting the live turn and a hidden
+ * resume turn will follow. Consumers that treat "run settled" as "work finished" (0bus durable
+ * requests) must wait for the resumed turn instead of answering from the aborted one.
+ * `{ pending: true }` before ctx.compact(); `{ pending: false, started }` once the resume turn has
+ * been triggered (started: true) or will never run (started: false).
+ */
+export const OM_RESUME_PENDING_EVENT = "om:resume-pending";
+
 /** Pi's retryable-error detection: don't compact between an auto-retried turn's attempts. */
 const RETRYABLE_ERROR_RE =
 	/overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i;
@@ -107,10 +116,23 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 		if (hasUI) ui?.notify("om: context threshold reached — compacting (waiting for in-flight observers)…", "info");
 
 		// Fire-and-forget. The before-compact hook waits for observers and renders the block.
+		const signal = (payload: { pending: boolean; started?: boolean }) => {
+			try {
+				(pi as any).events?.emit?.(OM_RESUME_PENDING_EVENT, payload);
+			} catch {
+				/* a listener must never break compaction */
+			}
+		};
+		if (shouldResume) signal({ pending: true });
+
 		const resume = () => {
 			// Resume only a mid-run compaction, and only if still enabled (the gate may have
 			// flipped, or the session may be tearing down, while compaction ran).
-			if (!shouldResume || !runtime.enabled || runtime.config.passive) return;
+			if (!shouldResume) return;
+			if (!runtime.enabled || runtime.config.passive) {
+				signal({ pending: false, started: false });
+				return;
+			}
 			try {
 				// sendMessage lives on the ExtensionAPI (`pi`), not on the event-handler ctx
 				// (ExtensionContext). Triggers a new turn from a hidden custom message.
@@ -118,10 +140,12 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 					{ customType: OM_RESUME, content: RESUME_PROMPT, display: false },
 					{ triggerTurn: true },
 				);
+				signal({ pending: false, started: true });
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
 				runtime.lastWorkerError = `resume failed: ${msg}`;
 				if (hasUI) ui?.notify(`om: resume failed — ${msg}`, "error");
+				signal({ pending: false, started: false });
 			}
 		};
 
@@ -134,13 +158,17 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			},
 			onError: (error: { message: string }) => {
 				runtime.compactInFlight = false;
-				if (error.message === "Compaction cancelled") return;
+				if (error.message === "Compaction cancelled") {
+					if (shouldResume) signal({ pending: false, started: false });
+					return;
+				}
 				// Another compaction already covered everything: our ctx.compact() still aborted the
 				// live agent loop, so the mid-run resume must happen or the agent stalls silently.
 				if (/already compacted|nothing to compact/i.test(error.message)) {
 					resume();
 					return;
 				}
+				if (shouldResume) signal({ pending: false, started: false });
 				if (hasUI) ui?.notify(`om: ${error.message}`, "error");
 			},
 		});
