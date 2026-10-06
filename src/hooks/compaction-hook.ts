@@ -139,6 +139,13 @@ export function registerCompactionHook(pi: ExtensionAPI, runtime: Runtime): void
 	pi.on("session_before_compact", async (event: any, ctx: any) => {
 		if (!runtime.enabled || runtime.config.passive) return undefined;
 
+		// OM owns proactive compaction (turn_end trigger at window minus margin). Pi's own
+		// threshold auto-compaction would race it: both fire on the same crossing, one wins and
+		// the other fails with "Nothing to compact" after aborting the live turn. Cancel Pi's
+		// threshold trigger while OM is on; "overflow" recovery and "manual" /compact still run,
+		// and so does OM's own ctx.compact() (guarded by compactInFlight).
+		if (event?.reason === "threshold" && !runtime.compactInFlight) return { cancel: true };
+
 		const hasUI = ctx.hasUI;
 		if (runtime.compactHookInFlight) {
 			if (hasUI) ctx.ui.notify("om: another compaction is already in progress; cancelling duplicate", "warning");

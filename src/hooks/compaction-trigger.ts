@@ -107,29 +107,40 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 		if (hasUI) ui?.notify("om: context threshold reached — compacting (waiting for in-flight observers)…", "info");
 
 		// Fire-and-forget. The before-compact hook waits for observers and renders the block.
+		const resume = () => {
+			// Resume only a mid-run compaction, and only if still enabled (the gate may have
+			// flipped, or the session may be tearing down, while compaction ran).
+			if (!shouldResume || !runtime.enabled || runtime.config.passive) return;
+			try {
+				// sendMessage lives on the ExtensionAPI (`pi`), not on the event-handler ctx
+				// (ExtensionContext). Triggers a new turn from a hidden custom message.
+				pi.sendMessage(
+					{ customType: OM_RESUME, content: RESUME_PROMPT, display: false },
+					{ triggerTurn: true },
+				);
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				runtime.lastWorkerError = `resume failed: ${msg}`;
+				if (hasUI) ui?.notify(`om: resume failed — ${msg}`, "error");
+			}
+		};
+
+		// Fire-and-forget. The before-compact hook waits for observers and renders the block.
 		ctx.compact({
 			onComplete: () => {
 				runtime.compactInFlight = false;
 				if (hasUI) ui?.notify("om: compaction complete", "info");
-				// Resume only a mid-run compaction, and only if still enabled (the gate may have
-				// flipped, or the session may be tearing down, while compaction ran).
-				if (!shouldResume || !runtime.enabled || runtime.config.passive) return;
-				try {
-					// sendMessage lives on the ExtensionAPI (`pi`), not on the event-handler ctx
-					// (ExtensionContext). Triggers a new turn from a hidden custom message.
-					pi.sendMessage(
-						{ customType: OM_RESUME, content: RESUME_PROMPT, display: false },
-						{ triggerTurn: true },
-					);
-				} catch (error) {
-					const msg = error instanceof Error ? error.message : String(error);
-					runtime.lastWorkerError = `resume failed: ${msg}`;
-					if (hasUI) ui?.notify(`om: resume failed — ${msg}`, "error");
-				}
+				resume();
 			},
 			onError: (error: { message: string }) => {
 				runtime.compactInFlight = false;
-				if (error.message === "Compaction cancelled" || /already compacted/i.test(error.message)) return;
+				if (error.message === "Compaction cancelled") return;
+				// Another compaction already covered everything: our ctx.compact() still aborted the
+				// live agent loop, so the mid-run resume must happen or the agent stalls silently.
+				if (/already compacted|nothing to compact/i.test(error.message)) {
+					resume();
+					return;
+				}
 				if (hasUI) ui?.notify(`om: ${error.message}`, "error");
 			},
 		});
