@@ -17,8 +17,14 @@ export type RawObservation = {
 	content: string;
 };
 
+export type ObserverSnapshot = {
+	title: string;
+	markdown: string;
+};
+
 export type ObserverRunResult = {
 	observations: RawObservation[];
+	snapshot?: ObserverSnapshot;
 };
 
 export function runsDir(root: string): string {
@@ -87,13 +93,23 @@ function isRawObservation(value: unknown): value is RawObservation {
 }
 
 /** Parse + validate an observer result file. Throws on malformed input. */
+function isObserverSnapshot(value: unknown): value is ObserverSnapshot {
+	if (!value || typeof value !== "object") return false;
+	const v = value as Record<string, unknown>;
+	return typeof v.title === "string" && v.title.trim().length > 0 && typeof v.markdown === "string" && v.markdown.trim().length > 0;
+}
+
 export function readObserverResult(path: string): ObserverRunResult {
 	const raw = JSON.parse(readFileSync(path, "utf-8")) as unknown;
 	if (!raw || typeof raw !== "object" || !Array.isArray((raw as { observations?: unknown }).observations)) {
 		throw new Error("observer result missing observations array");
 	}
 	const observations = (raw as { observations: unknown[] }).observations.filter(isRawObservation);
-	return { observations };
+	const rawSnap = (raw as { snapshot?: unknown }).snapshot;
+	const snapshot = isObserverSnapshot(rawSnap)
+		? { title: rawSnap.title.trim().slice(0, 160), markdown: rawSnap.markdown.trim().slice(0, 11500) }
+		: undefined;
+	return snapshot ? { observations, snapshot } : { observations };
 }
 
 export function writeObserverResult(path: string, result: ObserverRunResult): void {

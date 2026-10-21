@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { renderIndexFile, renderMemoryMap } from "../src/memory/index-render.js";
-import { atomicWrite, listTopics, parseFrontMatter, readJourney, resolveWithinMemory } from "../src/memory/paths.js";
+import { atomicWrite, listTopics, parseFrontMatter, readJourney, readSnapshot, resolveWithinMemory } from "../src/memory/paths.js";
 
 let cwd: string;
 let root: string; // the per-session memory root: <cwd>/.memory/<sessionId>
@@ -56,9 +56,10 @@ describe("parseFrontMatter", () => {
 });
 
 describe("listTopics", () => {
-	it("returns parsed topics excluding INDEX.md and JOURNEY.md, sorted by filename", () => {
+	it("returns parsed topics excluding INDEX.md, JOURNEY.md, and SNAPSHOT.md, sorted by filename", () => {
 		writeTopic("INDEX.md", "# Memory index");
 		writeTopic("JOURNEY.md", "## 2026-05-01\nStarted the project.");
+		writeTopic("SNAPSHOT.md", "# Project Snapshot\n\n## Goal & Scope\nShip it.");
 		writeTopic("zebra.md", "---\nid: zebra\ntitle: Zebra\nsummary: z\n---\nbody");
 		writeTopic("auth.md", "---\nid: auth\ntitle: Auth\nsummary: a\n---\nbody");
 		const topics = listTopics(root);
@@ -84,6 +85,12 @@ describe("readJourney", () => {
 	it("returns undefined when JOURNEY.md is effectively empty", () => {
 		writeTopic("JOURNEY.md", "   \n\n");
 		expect(readJourney(root)).toBeUndefined();
+	});
+
+	it("reads SNAPSHOT.md when present and ignores empty", () => {
+		expect(readSnapshot(root)).toBeUndefined();
+		writeTopic("SNAPSHOT.md", "\n# Cubicle\n\n## Goal & Scope\nRoute apphooks.\n");
+		expect(readSnapshot(root)).toBe("# Cubicle\n\n## Goal & Scope\nRoute apphooks.");
 	});
 });
 

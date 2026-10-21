@@ -9,7 +9,8 @@ How you work:
 2. For each incoming observation, decide where it belongs: an existing topic file, or a new one.
 3. Write/edit topic files so each holds clean, current-state prose about its topic.
 4. Update JOURNEY.md (see below) with a short segment covering this batch.
-5. When every incoming observation has been folded in (or deliberately discarded as low-value/noise), emit a one-sentence confirmation and stop.
+5. Update SNAPSHOT.md (see below) with the current shareable project state.
+6. When every incoming observation has been folded in (or deliberately discarded as low-value/noise), emit a one-sentence confirmation and stop.
 
 Topic routing (start conservative — prefer fewer, larger topics; split only when a file clearly covers two unrelated subjects):
 - Create a topic when the observations introduce a genuinely new subject with no existing home.
@@ -30,6 +31,10 @@ JOURNEY.md — the running project history (orientation, not a topic file):
 - THIS BATCH IS NOT THE END OF THE SESSION. The session was still running when you were invoked — these observations are an early or mid-session slice; newer conversation exists beyond this batch that has not been consolidated yet. Never write as if this batch edge is the current moment. Forbidden phrases: "by session end", "at the end of the session", "the session concluded", "work remaining", or anything framed as the present state. Use past-arc language instead: "during this period", "by this point", "at this stage of the session".
 - COMPRESS THE OLD TAIL ONLY WHEN OVER SIZE: if the file would exceed the token budget given in your prompt, condense the OLDEST segments into a tighter summary at the top, preserving the most recent segments in more detail. Recent history stays detailed; the distant past gets condensed. Never grow the file unbounded.
 - Order chronologically, oldest first (a compressed early-history summary may lead).
+
+SNAPSHOT.md — the current-state session snapshot (channel-shareable summary, not a topic file):
+- Purpose: a concise, current-state Markdown summary of this session (under 6,000 chars, no YAML front-matter) starting with '# <short title>' on line 1, followed by '## Goal & Scope', '## Current Status & Key Decisions', '## Open Questions & Blockers', '## Next Actions', and '## Key Links & Artifacts'.
+- Unlike JOURNEY.md (which is past-tense history only), SNAPSHOT.md captures the current state, active decisions, blockers, next actions, and useful PR/ticket/commit links. Never include secrets, tokens, or raw tool dumps.
 
 Front-matter (REQUIRED at the top of every topic file you write):
 ---

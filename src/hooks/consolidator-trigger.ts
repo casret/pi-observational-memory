@@ -31,7 +31,7 @@ import {
 } from "../ledger/index.js";
 import { nowTimestamp } from "../ledger/serialize.js";
 import { renderIndexFile } from "../memory/index-render.js";
-import { atomicWrite, indexPath, listTopics, readJourney } from "../memory/paths.js";
+import { atomicWrite, indexPath, listTopics, readJourney, readSnapshot } from "../memory/paths.js";
 import { removeRunFiles } from "../memory/session.js";
 import type { Runtime } from "../runtime.js";
 import { buildWorkerArgv, buildWorkerEnv, spawnWorker } from "../spawn/launch.js";
@@ -41,11 +41,12 @@ import { recordWorkerCost } from "./observer-trigger.js";
 type TriggerCtx = {
 	hasUI: boolean;
 	ui?: { notify: (message: string, level?: "info" | "warning" | "error") => void };
-	sessionManager: ProjectionSessionManager & { getEntries: () => Entry[] };
+	sessionManager: ProjectionSessionManager & { getEntries: () => Entry[]; getSessionFile?: () => string | undefined };
 	getContextUsage?: () => { tokens: number | null; contextWindow?: number } | undefined;
 };
 
 let runCounter = 0;
+const snapshotSeedAttemptedRoots = new Set<string>();
 
 function nextRunId(): string {
 	runCounter += 1;
@@ -61,6 +62,7 @@ function nextRunId(): string {
 function buildConsolidatorPrompt(memoryRoot: string, promote: Observation[], journeyTargetTokens: number): string {
 	const indexText = renderIndexFile(listTopics(memoryRoot));
 	const journeyText = readJourney(memoryRoot);
+	const snapshotText = readSnapshot(memoryRoot);
 	const journeyWords = Math.round((journeyTargetTokens * 3) / 4);
 	const obsLines = sortObservations(promote).map(observationToLine).join("\n");
 	return (
@@ -73,12 +75,15 @@ function buildConsolidatorPrompt(memoryRoot: string, promote: Observation[], jou
 		"===== CURRENT JOURNEY (.memory/JOURNEY.md — the running descriptive project history) =====\n" +
 		`${journeyText ?? "(empty — no journey yet; start one)"}\n` +
 		"===== END JOURNEY =====\n\n" +
+		"===== CURRENT SNAPSHOT (.memory/SNAPSHOT.md — current-state summary) =====\n" +
+		`${snapshotText ?? "(empty — no snapshot yet; write SNAPSHOT.md)"}\n` +
+		"===== END SNAPSHOT =====\n\n" +
 		"===== OBSERVATIONS TO CONSOLIDATE (each line is `<timestamp-id>  <content>`) =====\n" +
 		`${obsLines}\n` +
 		"===== END OBSERVATIONS =====\n\n" +
 		"Fold every observation above into topic files (create/merge/rewrite as needed). Then update " +
 		`.memory/JOURNEY.md per your instructions — keep it under ~${journeyTargetTokens} tokens (~${journeyWords} words), ` +
-		"purely descriptive, no advice or next steps. Finish with a one-sentence confirmation."
+		"purely descriptive, no advice or next steps — and update .memory/SNAPSHOT.md with the current shareable project snapshot. Finish with a one-sentence confirmation."
 	);
 }
 
@@ -88,18 +93,36 @@ export function evaluateConsolidatorTrigger(pi: ExtensionAPI, runtime: Runtime, 
 
 	const branch = canonicalBranch(ctx.sessionManager);
 	const active = foldLedger(branch).activeObservations;
-	if (poolTokens(active) < runtime.config.consolidateAtPoolTokens) return;
-
-	const { promote } = selectPromotionOverflow(active, runtime.config.poolTargetTokens);
-	if (promote.length === 0) return;
-
-	runtime.consolidatorInFlight = true;
-	if (ctx.hasUI) {
-		ctx.ui?.notify(`om: consolidator started (${promote.length} obs, ~${poolTokens(promote).toLocaleString()} tok)`, "info");
+	if (poolTokens(active) >= runtime.config.consolidateAtPoolTokens) {
+		const { promote } = selectPromotionOverflow(active, runtime.config.poolTargetTokens);
+		if (promote.length > 0) {
+			runtime.consolidatorInFlight = true;
+			if (ctx.hasUI) {
+				ctx.ui?.notify(`om: consolidator started (${promote.length} obs, ~${poolTokens(promote).toLocaleString()} tok)`, "info");
+			}
+			// Deliberately NOT tracked in observerTasks: compaction waits only for in-flight observers,
+			// never the consolidator (design R5). The consolidatorInFlight flag enforces one-at-a-time.
+			void dispatchConsolidator(pi, runtime, ctx, promote);
+			return;
+		}
 	}
-	// Deliberately NOT tracked in observerTasks: compaction waits only for in-flight observers,
-	// never the consolidator (design R5). The consolidatorInFlight flag enforces one-at-a-time.
-	void dispatchConsolidator(pi, runtime, ctx, promote);
+
+	// If a persistent session already has durable memory/observations from before SNAPSHOT.md
+	// existed, run a one-time snapshot-only pass (promoting 0 observations) to write SNAPSHOT.md.
+	if (
+		runtime.memoryRoot &&
+		ctx.sessionManager.getSessionFile?.() &&
+		!snapshotSeedAttemptedRoots.has(runtime.memoryRoot) &&
+		!readSnapshot(runtime.memoryRoot) &&
+		(active.length > 0 || Boolean(readJourney(runtime.memoryRoot)))
+	) {
+		snapshotSeedAttemptedRoots.add(runtime.memoryRoot);
+		runtime.consolidatorInFlight = true;
+		if (ctx.hasUI) {
+			ctx.ui?.notify("om: generating initial SNAPSHOT.md", "info");
+		}
+		void dispatchConsolidator(pi, runtime, ctx, [], active.slice(-40));
+	}
 }
 
 async function dispatchConsolidator(
@@ -107,6 +130,7 @@ async function dispatchConsolidator(
 	runtime: Runtime,
 	ctx: TriggerCtx,
 	promote: Observation[],
+	snapshotContextObs: Observation[] = promote,
 ): Promise<void> {
 	const runId = nextRunId();
 	const controller = new AbortController();
@@ -114,7 +138,7 @@ async function dispatchConsolidator(
 	runtime.status.workerStart("consolidator", runId);
 
 	try {
-		const prompt = buildConsolidatorPrompt(runtime.memoryRoot, promote, runtime.config.journeyTargetTokens);
+		const prompt = buildConsolidatorPrompt(runtime.memoryRoot, snapshotContextObs, runtime.config.journeyTargetTokens);
 		const promptPath = runPromptPath(runtime.memoryRoot, runId);
 		writeWorkerPrompt(promptPath, prompt);
 		const argv = buildWorkerArgv({
@@ -166,6 +190,7 @@ async function dispatchConsolidator(
 
 export function registerConsolidatorTrigger(pi: ExtensionAPI, runtime: Runtime): void {
 	const handler = (_event: unknown, ctx: TriggerCtx) => evaluateConsolidatorTrigger(pi, runtime, ctx);
+	pi.on("session_start", handler as never);
 	pi.on("turn_end", handler as never);
 	pi.on("agent_start", handler as never);
 }

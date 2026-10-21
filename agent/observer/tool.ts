@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Static } from "typebox";
-import { writeObserverResult, type RawObservation } from "../../src/spawn/runs.js";
+import { writeObserverResult, type ObserverSnapshot, type RawObservation } from "../../src/spawn/runs.js";
 
 export const OBSERVATION_TIMESTAMP_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$";
 
@@ -19,6 +19,17 @@ const RecordObservationsSchema = Type.Object({
 		}),
 		{ description: "Batch of new observations. Call multiple times until the chunk is fully covered." },
 	),
+	snapshot: Type.Optional(
+		Type.Object({
+			title: Type.String({ minLength: 1, maxLength: 160, description: "Short session title (<topic/current focus>)." }),
+			markdown: Type.String({
+				minLength: 1,
+				maxLength: 11500,
+				description:
+					"Updated current-state SNAPSHOT.md body (## Goal & Scope, ## Current Status & Key Decisions, ## Open Questions & Blockers, ## Next Actions, ## Key Links & Artifacts). Never include secrets or raw dumps.",
+			}),
+		}),
+	),
 });
 
 export type RecordObservationsInput = Static<typeof RecordObservationsSchema>;
@@ -31,9 +42,10 @@ export type RecordObservationsInput = Static<typeof RecordObservationsSchema>;
 export function registerObserverTool(pi: ExtensionAPI, resultPath: string): void {
 	const accumulated: RawObservation[] = [];
 	const seen = new Set<string>();
+	let latestSnapshot: ObserverSnapshot | undefined;
 
 	function flush(): void {
-		writeObserverResult(resultPath, { observations: accumulated });
+		writeObserverResult(resultPath, latestSnapshot ? { observations: accumulated, snapshot: latestSnapshot } : { observations: accumulated });
 	}
 
 	// Ensure a valid (possibly empty) result file exists even for zero-observation chunks.
@@ -61,6 +73,12 @@ export function registerObserverTool(pi: ExtensionAPI, resultPath: string): void
 				seen.add(key);
 				accumulated.push({ timestamp: obs.timestamp, content });
 				added++;
+			}
+			if (params.snapshot?.title?.trim() && params.snapshot?.markdown?.trim()) {
+				latestSnapshot = {
+					title: params.snapshot.title.replace(/[\r\n\t]+/g, " ").trim().slice(0, 160),
+					markdown: params.snapshot.markdown.trim().slice(0, 11500),
+				};
 			}
 			flush();
 			const dupPart = duplicates > 0 ? ` (${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped)` : "";

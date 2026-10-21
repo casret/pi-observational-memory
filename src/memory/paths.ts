@@ -27,6 +27,12 @@ export const INDEX_FILENAME = "INDEX.md";
  * topic file: it is excluded from `listTopics`/the memory map and read verbatim at compaction.
  */
 export const JOURNEY_FILENAME = "JOURNEY.md";
+/**
+ * Curated current-state project/session snapshot (Goal, Status/Decisions, Open Questions/Blockers,
+ * Next Actions, Key Links). Updated by observer/consolidator runs and synced to Igor canvases.
+ * Excluded from `listTopics` like INDEX.md and JOURNEY.md.
+ */
+export const SNAPSHOT_FILENAME = "SNAPSHOT.md";
 
 /** Suffix replacing `.jsonl` on the session transcript to name its memory root. */
 export const MEMORY_DIR_SUFFIX = ".memory";
@@ -62,9 +68,25 @@ export function journeyPath(root: string): string {
 	return join(root, JOURNEY_FILENAME);
 }
 
+export function snapshotPath(root: string): string {
+	return join(root, SNAPSHOT_FILENAME);
+}
+
 /** Read `.memory/JOURNEY.md` body, trimmed. Returns undefined when missing or effectively empty. */
 export function readJourney(root: string): string | undefined {
 	const path = journeyPath(root);
+	if (!existsSync(path)) return undefined;
+	try {
+		const body = readFileSync(path, "utf-8").trim();
+		return body.length > 0 ? body : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Read `.memory/SNAPSHOT.md` body, trimmed. Returns undefined when missing or effectively empty. */
+export function readSnapshot(root: string): string | undefined {
+	const path = snapshotPath(root);
 	if (!existsSync(path)) return undefined;
 	try {
 		const body = readFileSync(path, "utf-8").trim();
@@ -148,7 +170,13 @@ export function listTopics(root: string): Topic[] {
 	if (!existsSync(root)) return [];
 	const topics: Topic[] = [];
 	for (const filename of readdirSync(root)) {
-		if (!filename.endsWith(".md") || filename === INDEX_FILENAME || filename === JOURNEY_FILENAME) continue;
+		if (
+			!filename.endsWith(".md") ||
+			filename === INDEX_FILENAME ||
+			filename === JOURNEY_FILENAME ||
+			filename === SNAPSHOT_FILENAME
+		)
+			continue;
 		let content: string;
 		try {
 			content = readFileSync(join(root, filename), "utf-8");
