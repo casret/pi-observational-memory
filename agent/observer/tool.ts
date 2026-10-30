@@ -26,7 +26,7 @@ const RecordObservationsSchema = Type.Object({
 				minLength: 1,
 				maxLength: 11500,
 				description:
-					"Updated current-state SNAPSHOT.md body (## Goal & Scope, ## Current Status & Key Decisions, ## Open Questions & Blockers, ## Next Actions, ## Key Links & Artifacts). Never include secrets or raw dumps.",
+					"Updated current-state SNAPSHOT.md body written as a human-readable narrative story (## The Story So Far, ## Where Things Stand, ## Decisions & Open Questions, ## What's Next) — prose narrative first, high-level outcomes, no commit-SHA/line-number dumps or secrets.",
 			}),
 		}),
 	),

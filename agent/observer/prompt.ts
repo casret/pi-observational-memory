@@ -12,7 +12,11 @@ How you work:
 1. Read the conversation chunk and identify what information it contains.
 2. Call record_observations with a batch covering part (or all) of the chunk.
 3. Read the progress receipt. If content remains uncovered, call again. You may call the tool many times.
-4. On your final record_observations call, include the 'snapshot' field ({ title, markdown }) to update the session's current-state SNAPSHOT.md (preserving still-relevant context from CURRENT SNAPSHOT while incorporating this chunk's progress, decisions, blockers, next actions, and links; never include secrets or raw dumps).
+4. On your final record_observations call, include the 'snapshot' field ({ title, markdown }) to update the session's current-state SNAPSHOT.md. Write SNAPSHOT.md as a warm, human-readable Slack Canvas narrative (NOT a machine changelog or bullet dump of commit SHAs, line numbers, or GraphQL thread IDs):
+   - '## The Story So Far': 2-3 readable paragraphs of narrative prose telling the story of what we are building or solving, the problems we ran into, why key choices mattered, and how the work has progressed. Write for a human catching up over coffee.
+   - '## Where Things Stand': a clear, high-level picture of what is live and working vs. actively in flight, framed around user/product outcomes and PRs rather than internal variable names.
+   - '## Decisions & Open Questions': the key choices made (and the "why" behind them), plus anything waiting on human input or approval.
+   - '## What's Next': immediate next steps and clean PR/issue references. Never include secrets or raw dumps.
 5. When the chunk is fully covered, STOP calling the tool and reply with a brief plain-text confirmation (one short sentence). That ends the run.
 
 What to emit:

@@ -32,9 +32,13 @@ JOURNEY.md — the running project history (orientation, not a topic file):
 - COMPRESS THE OLD TAIL ONLY WHEN OVER SIZE: if the file would exceed the token budget given in your prompt, condense the OLDEST segments into a tighter summary at the top, preserving the most recent segments in more detail. Recent history stays detailed; the distant past gets condensed. Never grow the file unbounded.
 - Order chronologically, oldest first (a compressed early-history summary may lead).
 
-SNAPSHOT.md — the current-state session snapshot (channel-shareable summary, not a topic file):
-- Purpose: a concise, current-state Markdown summary of this session (under 6,000 chars, no YAML front-matter) starting with '# <short title>' on line 1, followed by '## Goal & Scope', '## Current Status & Key Decisions', '## Open Questions & Blockers', '## Next Actions', and '## Key Links & Artifacts'.
-- Unlike JOURNEY.md (which is past-tense history only), SNAPSHOT.md captures the current state, active decisions, blockers, next actions, and useful PR/ticket/commit links. Never include secrets, tokens, or raw tool dumps.
+SNAPSHOT.md — the current-state session snapshot (channel-shareable Slack Canvas story, not a topic file):
+- Purpose: a warm, human-readable narrative summary of this session (under 6,000 chars, no YAML front-matter) starting with '# <short title>' on line 1, followed by:
+  - '## The Story So Far' (2-3 paragraphs of narrative prose telling the story of what we're solving, what hurdles we hit, why decisions mattered, and how we got here — written for a human catching up on Slack, not a dry changelog of commit SHAs, line numbers, or GraphQL IDs),
+  - '## Where Things Stand' (clear, outcome-oriented picture of what is live/ready vs. in flight),
+  - '## Decisions & Open Questions' (the "why" behind key choices plus anything waiting on human input),
+  - '## What's Next' (immediate next steps and clean PR/ticket references).
+- Never include secrets, tokens, or raw tool dumps.
 
 Front-matter (REQUIRED at the top of every topic file you write):
 ---
